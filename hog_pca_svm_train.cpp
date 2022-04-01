@@ -104,9 +104,9 @@ static void detect_object(matrix<rgb_pixel> image, cv::PCA& pca, Ptr<SVM>& svm, 
     float                 	predict_socre;
     float                   history_score;
     cv::Mat             	predictMat(1, nEigens, CV_32FC1);
+    cv::Point               p0,p1;
     std::vector<cv::Rect> 	srcRects;
     std::vector<cv::Rect> 	dstRects;
-	cv::Point 				p0,p1;
     int                 	windows_n_rows  = win_size.height;
     int                 	windows_n_cols  = win_size.width;
     int                 	StepSlide_row   = 32;
@@ -155,8 +155,8 @@ static void detect_object(matrix<rgb_pixel> image, cv::PCA& pca, Ptr<SVM>& svm, 
     nms(srcRects, dstRects, 0.3f, 0);
     for( auto& r : dstRects)
     {
-    	dlib::rectangle drect = dlib::rectangle(r.tl().x, r.tl().y, r.br().x, r.br().y);
-    	draw_rectangle(image, drect,rgb_pixel(255,0,0));
+    	dlib::rectangle drect(r.tl().x, r.tl().y, r.br().x, r.br().y);
+    	dlib::draw_rectangle(image, drect,rgb_pixel(255,0,0));
     }
 
     //test
