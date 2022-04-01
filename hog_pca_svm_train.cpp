@@ -160,9 +160,9 @@ static void detect_object(matrix<rgb_pixel> image, cv::PCA& pca, Ptr<SVM>& svm, 
     }
 
     //test
-    /*image_window iwin;
+    image_window iwin;
     iwin.set_image(image);
-    usleep(6000000);*/
+    usleep(2000000);
 }
 
 static void pca_load(const string &file_name, cv::PCA _pca)
@@ -249,7 +249,7 @@ int main(int argc, char** argv)
 	struct timespec t1, t2;
 	clock_gettime(CLOCK_REALTIME, &t1);
 
-	for (int k=0; k<200; k++) //for test loop
+	//for (int k=0; k<200; k++) //for test loop
 	{
 		/*compute_HOGs( test_lst, test_gradients, win_size, false );
 		for(auto& src : test_gradients)
