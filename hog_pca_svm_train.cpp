@@ -21,12 +21,33 @@ using namespace cv;
 using namespace cv::ml;
 using namespace dlib;
 
+typedef struct _CorpImage_t
+{
+	dlib::rectangle		drect;
+	matrix<rgb_pixel>   img_rgb;;
+}CorpImage_t;
+
+typedef struct _CorpHog_t
+{
+	dlib::rectangle 		drect;
+	std::vector<cv::Mat>	feature_lst;
+}CorpHog_t;
+
+static int					s_thread_num = 32;
+static volatile int			s_signal_num = 32; //must use volatile avoid release lock in cache
+std::vector<CorpImage_t>	s_corpdata_lst;
+std::vector<CorpHog_t>		s_hogdata_lst;
+pthread_mutex_t 			s_main_lock;
+pthread_mutex_t 			s_img_lock;
+pthread_mutex_t 			s_hog_lock;
+pthread_cond_t 				s_thread_cond;
+
 static void load_images( const String& dirname, std::vector<matrix<rgb_pixel>>& img_lst, Size img_size, bool isTrain = true)
 {
     std::vector<String> files;
     glob( dirname, files );
 
-    for ( size_t i = 0; i < files.size(); ++i )
+    for ( size_t i = 0; i < files.size(); i++ )
     {
         //pca only
         /*cv::Mat gray;
@@ -78,9 +99,9 @@ static void compute_HOGs( std::vector<matrix<rgb_pixel>>& img_lst, std::vector<c
 
         dlib::array<dlib::array2d<float>> planar_hog;
         extract_fhog_features(img_lst[i], planar_hog);
-        for(uint32_t k=0; k<planar_hog.size(); k+=4) //we don't need all size() 31 features so k+=4
+        for(uint32_t u=0; u<planar_hog.size(); u+=4) //we don't need all size() 31 features so k+=4
         {
-            cv::Mat cMat = toMat(planar_hog[k]);
+            cv::Mat cMat = toMat(planar_hog[u]);
             gradient_lst.push_back(cMat.clone());
         }
     }
@@ -90,19 +111,63 @@ static void get_OneHOG(matrix<rgb_pixel>& img, std::vector<cv::Mat>& gradient_ls
 {
 	dlib::array<dlib::array2d<float>> planar_hog;
 	extract_fhog_features(img, planar_hog);
-	for(uint32_t k=0; k<planar_hog.size(); k+=4) //we don't need all size() 31 features so k+=4
+	for(uint32_t u=0; u<planar_hog.size(); u+=4) //we don't need all size() 31 features so k+=4
 	{
-		cv::Mat cMat = toMat(planar_hog[k]);
+		cv::Mat cMat = toMat(planar_hog[u]);
 		gradient_lst.push_back(cMat.clone());
 	}
+}
+
+static void Image_Process(int corp_pos, CorpImage_t& corp_image)
+{
+    pthread_mutex_lock(&s_img_lock);
+
+    corp_image = s_corpdata_lst[corp_pos];
+
+    pthread_mutex_unlock(&s_img_lock);
+}
+
+static void Hog_Process(CorpHog_t hog_data)
+{
+    pthread_mutex_lock(&s_hog_lock);
+
+    s_hogdata_lst.push_back(hog_data);
+
+    if(s_hogdata_lst.size() >= s_signal_num)
+    	pthread_cond_signal(&s_thread_cond);
+
+    pthread_mutex_unlock(&s_hog_lock);
+}
+
+static void* Thread_OneCorp(void* arg)
+{
+	CorpHog_t 							hog_data;
+	CorpImage_t							corp_data;
+	dlib::array<dlib::array2d<float>> 	planar_hog;
+
+	Image_Process(*(uint32_t*)arg, corp_data);
+	free(arg);
+
+	hog_data.drect = corp_data.drect;
+	//cout << "s2:" << hog_data.drect.left() << "," << hog_data.drect.top() << "," << hog_data.drect.right() << "," << hog_data.drect.bottom() << endl;
+	extract_fhog_features(corp_data.img_rgb, planar_hog);
+	for(uint32_t u=0; u<planar_hog.size(); u+=4) //we don't need all size() 31 features so k+=4
+	{
+		cv::Mat cMat = toMat(planar_hog[u]);
+		hog_data.feature_lst.push_back(cMat.clone());
+	}
+
+	Hog_Process(hog_data);
+
+    return NULL;
 }
 
 //static void detect_object(matrix<rgb_pixel>& image, cv::PCA& pca, Ptr<SVM>& svm, int nEigens, Size win_size, float thres_hold = 0.01f)
 static void detect_object(matrix<rgb_pixel> image, cv::PCA& pca, Ptr<SVM>& svm, int nEigens, Size win_size, float thres_hold = 0.01f) //no &image will keep original
 {
-    float                   feature_times;
-    float                 	predict_socre;
-    float                   history_score;
+    int                     feature_times;
+    float                	predict_socre;
+    float                 	history_score;
     cv::Mat             	predictMat(1, nEigens, CV_32FC1);
     cv::Point               p0,p1;
     std::vector<cv::Rect> 	srcRects;
@@ -111,46 +176,93 @@ static void detect_object(matrix<rgb_pixel> image, cv::PCA& pca, Ptr<SVM>& svm, 
     int                 	windows_n_cols  = win_size.width;
     int                 	StepSlide_row   = 32;
     int                 	StepSlide_col   = 64;
+    pthread_attr_t          pattr;
+    pthread_t               pthread_id;
+    matrix<rgb_pixel>   		clip_img;
+    std::vector<CorpImage_t>	corpdata_lst;
+    CorpImage_t					corp_data;
 
-    history_score = 0;
+    pthread_attr_init(&pattr);
+    pthread_attr_setdetachstate(&pattr, PTHREAD_CREATE_DETACHED);
+
+    history_score = 0.0f;
 
     for (int row = 0; row <= image.nr()- windows_n_rows; row += StepSlide_row)
     {
         for (int col = 0; col <= image.nc() - windows_n_cols; col += StepSlide_col)
         {
-        	matrix<rgb_pixel>   	clip_img;
-        	std::vector<cv::Mat>	detect_gradients;
-        	dlib::rectangle rect(col, row, col+windows_n_cols-1, row+windows_n_rows-1);
-            extract_image_chip(image, rect, clip_img);
-            get_OneHOG(clip_img, detect_gradients);
+        	dlib::rectangle drect(col, row, col+windows_n_cols-1, row+windows_n_rows-1);
+        	/*drect.set_left(col);
+        	drect.set_top(row);
+        	drect.set_right(col+windows_n_cols-1);
+        	drect.set_bottom(row+windows_n_rows-1);*/
 
-            feature_times   = 0;
-            predict_socre   = 0;
-            for(uint32_t k=0; k<detect_gradients.size(); k+=4)
-            {
-                cv::Mat dst = detect_gradients[k].reshape(1, 1);
-            	pca.project(dst, predictMat);
-
-            	if( svm->predict(predictMat) >= 1 )
-            	{
-            	    predict_socre += 1.0f;
-            	    history_score += 1.0f;
-            	}
-
-            	feature_times += 1.0f;
-            }
-
-            if ( predict_socre / feature_times >= thres_hold )
-            {
-                //draw_rectangle(image,rect,rgb_pixel(255,0,0));
-                p0 = cv::Point(col, row);
-                p1 = cv::Point(col+windows_n_cols-1, row+windows_n_rows-1);
-                srcRects.emplace_back(p0, p1);
-            }
+        	extract_image_chip(image, drect, clip_img);
+        	corp_data.drect 	= drect;
+        	corp_data.img_rgb 	= clip_img;
+        	s_corpdata_lst.push_back(corp_data);
         }
     }
 
-    cout << history_score << endl; //test
+    uint32_t 	strider		= 0;
+    uint32_t 	remain_size	= s_corpdata_lst.size();
+    while( remain_size > 0 )
+    {
+    	if( remain_size >= s_thread_num )
+    		s_signal_num = s_thread_num;
+    	else
+    		s_signal_num = remain_size;
+
+    	/*must malloc memory pointer to pthread_create,
+    	 *using one address send to pthread_create,
+    	 *some of Thread_OneCorp will get same corp_pos*/
+    	for(uint32_t z=0; z<s_signal_num; z++)
+		{
+    		uint32_t* corp_pos 	= (uint32_t*)malloc(sizeof(uint32_t));
+    		*corp_pos 			= strider*s_thread_num + z;
+    		pthread_create(&pthread_id, &pattr, Thread_OneCorp, (void*)corp_pos);
+		}
+    	pthread_mutex_lock(&s_main_lock);
+		pthread_cond_wait(&s_thread_cond, &s_main_lock);
+		pthread_mutex_unlock(&s_main_lock);
+
+		for(uint32 i=0; i<s_hogdata_lst.size(); i++) //the most s_hogdata_lst is cpu threads number
+		{
+			CorpHog_t hog_data	= s_hogdata_lst[i];
+			feature_times 		= 0;
+			predict_socre 		= 0.0f;
+
+			for(uint32_t u=0; u<hog_data.feature_lst.size(); u+=4) //the most feature_lst is 31
+			{
+				cv::Mat dst = hog_data.feature_lst[u].reshape(1, 1);
+				pca.project(dst, predictMat);
+
+				if( svm->predict(predictMat) >= 1 )
+				{
+					predict_socre += 1.0f;
+					history_score += 1.0f;
+				}
+
+				feature_times++;
+			}
+			hog_data.feature_lst.clear(); //the most feature_lst is 31
+
+			if ( predict_socre / (float)feature_times >= thres_hold )
+			{
+				//cout << onehog.drect.left() << "," << onehog.drect.top() << "," << onehog.drect.right() << "," << onehog.drect.bottom() << endl;
+				p0 = cv::Point(hog_data.drect.left(),	hog_data.drect.top());
+				p1 = cv::Point(hog_data.drect.right(),	hog_data.drect.bottom());
+				srcRects.emplace_back(p0, p1);
+			}
+		}
+		s_hogdata_lst.clear(); //the most s_hogdata_lst is cpu threads number
+
+		strider++;
+		remain_size -= s_signal_num;
+    }
+    s_corpdata_lst.clear();
+
+    cout << "hscore: " << history_score << endl; //test
 
     nms(srcRects, dstRects, 0.3f, 0);
     for( auto& r : dstRects)
@@ -159,10 +271,14 @@ static void detect_object(matrix<rgb_pixel> image, cv::PCA& pca, Ptr<SVM>& svm, 
     	dlib::draw_rectangle(image, drect,rgb_pixel(255,0,0));
     }
 
-    //test
+    //test show
+    cout << "close window to end" << endl; 		//test
     image_window iwin;
     iwin.set_image(image);
-    usleep(2000000);
+    iwin.wait_until_closed();
+    //usleep(2000000);
+
+    pthread_attr_destroy(&pattr);
 }
 
 static void pca_load(const string &file_name, cv::PCA _pca)
@@ -191,6 +307,11 @@ int main(int argc, char** argv)
     std::vector<matrix<rgb_pixel>>  pos_lst, neg_lst, test_lst;
     std::vector<cv::Mat>            train_gradients, test_gradients;
     Size                            win_size = Size(128, 256);
+
+	pthread_mutex_init(&s_main_lock,NULL);
+	pthread_mutex_init(&s_img_lock, NULL);
+    pthread_mutex_init(&s_hog_lock,NULL);
+    pthread_cond_init(&s_thread_cond,NULL);
 
     load_images("./pos", pos_lst, win_size);
     compute_HOGs( pos_lst, train_gradients, win_size, false );
@@ -249,7 +370,7 @@ int main(int argc, char** argv)
 	struct timespec t1, t2;
 	clock_gettime(CLOCK_REALTIME, &t1);
 
-	//for (int k=0; k<200; k++) //for test loop
+	//for (int k=0; k<1000; k++) //for test fps
 	{
 		/*compute_HOGs( test_lst, test_gradients, win_size, false );
 		for(auto& src : test_gradients)
@@ -273,6 +394,11 @@ int main(int argc, char** argv)
 	elapsed = ((t2.tv_sec - t1.tv_sec) * 1000000000 + t2.tv_nsec - t1.tv_nsec) / 1000000000.0;
 	fps 	= frames / elapsed;
 	printf("detected frames=%lu\nelapsed time=%f\nfps=%f\n", frames, elapsed, fps);
+
+	pthread_cond_destroy(&s_thread_cond);
+	pthread_mutex_destroy(&s_hog_lock);
+	pthread_mutex_destroy(&s_img_lock);
+	pthread_mutex_destroy(&s_main_lock);
 
 	return EXIT_SUCCESS;
 }
