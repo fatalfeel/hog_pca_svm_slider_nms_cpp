@@ -216,11 +216,10 @@ static void detect_object(matrix<rgb_pixel> image, cv::PCA& pca, Ptr<SVM>& svm, 
     	/*must malloc memory pointer to pthread_create,
     	 *using one address send to pthread_create,
     	 *some of Thread_OneCorp will get same corp_pos*/
-    	uint32_t* 				corp_pos;
-    	std::vector<uint32_t*> 	corp_pos_lst;
+    	std::vector<uint32_t*> corp_pos_lst;
     	for(uint32_t z=0; z<s_signal_num; z++)
 		{
-    		corp_pos 	= (uint32_t*)malloc(sizeof(uint32_t));
+    		uint32_t* corp_pos = (uint32_t*)malloc(sizeof(uint32_t));
     		//cout << "s1 " << corp_pos << endl;
     		corp_pos_lst.push_back(corp_pos);
     		*corp_pos	= strider*s_thread_num + z;
@@ -232,7 +231,7 @@ static void detect_object(matrix<rgb_pixel> image, cv::PCA& pca, Ptr<SVM>& svm, 
 
 		for(uint32_t i=0; i<corp_pos_lst.size(); i++)
 		{
-			corp_pos = corp_pos_lst[i];
+			uint32_t* corp_pos = corp_pos_lst[i];
 			//cout << "s2 " << corp_pos << endl;
 			free(corp_pos);
 		}
