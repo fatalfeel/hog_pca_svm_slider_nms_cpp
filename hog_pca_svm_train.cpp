@@ -208,10 +208,10 @@ static void detect_object(matrix<rgb_pixel> image, cv::PCA& pca, Ptr<SVM>& svm, 
     uint32_t 	remain_size	= s_corpdata_lst.size();
     while( remain_size > 0 )
     {
-    	if( remain_size >= s_thread_num )
-    		s_signal_num = s_thread_num;
-    	else
-    		s_signal_num = remain_size;
+        if( remain_size >= s_thread_num )
+            s_signal_num = s_thread_num;
+        else
+            s_signal_num = remain_size;
 
     	/*must malloc memory pointer to pthread_create,
     	 *using one address send to pthread_create,
@@ -266,10 +266,10 @@ static void detect_object(matrix<rgb_pixel> image, cv::PCA& pca, Ptr<SVM>& svm, 
                 srcRects.emplace_back(p0, p1);
             }
         }
-		s_hogdata_lst.clear(); //the most s_hogdata_lst is cpu threads number
+        s_hogdata_lst.clear(); //the most s_hogdata_lst is cpu threads number
 
-		strider++;
-		remain_size -= s_signal_num;
+        strider++;
+        remain_size -= s_signal_num;
     }
     s_corpdata_lst.clear();
 
