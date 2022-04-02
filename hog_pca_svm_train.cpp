@@ -146,7 +146,7 @@ static void* Thread_OneCorp(void* arg)
 	dlib::array<dlib::array2d<float>> 	planar_hog;
 
 	Image_Process(*(uint32_t*)arg, corp_data);
-	free(arg);
+	//cout << "s3 " << arg << endl;
 
 	hog_data.drect = corp_data.drect;
 	//cout << "s2:" << hog_data.drect.left() << "," << hog_data.drect.top() << "," << hog_data.drect.right() << "," << hog_data.drect.bottom() << endl;
@@ -216,15 +216,27 @@ static void detect_object(matrix<rgb_pixel> image, cv::PCA& pca, Ptr<SVM>& svm, 
     	/*must malloc memory pointer to pthread_create,
     	 *using one address send to pthread_create,
     	 *some of Thread_OneCorp will get same corp_pos*/
+    	uint32_t* 				corp_pos;
+    	std::vector<uint32_t*> 	corp_pos_lst;
     	for(uint32_t z=0; z<s_signal_num; z++)
 		{
-    		uint32_t* corp_pos 	= (uint32_t*)malloc(sizeof(uint32_t));
-    		*corp_pos 			= strider*s_thread_num + z;
+    		corp_pos 	= (uint32_t*)malloc(sizeof(uint32_t));
+    		//cout << "s1 " << corp_pos << endl;
+    		corp_pos_lst.push_back(corp_pos);
+    		*corp_pos	= strider*s_thread_num + z;
     		pthread_create(&pthread_id, &pattr, Thread_OneCorp, (void*)corp_pos);
 		}
     	pthread_mutex_lock(&s_main_lock);
 		pthread_cond_wait(&s_thread_cond, &s_main_lock);
 		pthread_mutex_unlock(&s_main_lock);
+
+		for(uint32_t i=0; i<corp_pos_lst.size(); i++)
+		{
+			corp_pos = corp_pos_lst[i];
+			//cout << "s2 " << corp_pos << endl;
+			free(corp_pos);
+		}
+		corp_pos_lst.clear();
 
 		for(uint32 i=0; i<s_hogdata_lst.size(); i++) //the most s_hogdata_lst is cpu threads number
 		{
@@ -265,8 +277,9 @@ static void detect_object(matrix<rgb_pixel> image, cv::PCA& pca, Ptr<SVM>& svm, 
     cout << "hscore: " << history_score << endl; //test
 
     nms(srcRects, dstRects, 0.3f, 0);
-    for( auto& r : dstRects)
+    for( int i=0; i<dstRects.size(); i++)
     {
+    	cv::Rect r = dstRects[i];
     	dlib::rectangle drect(r.tl().x, r.tl().y, r.br().x, r.br().y);
     	dlib::draw_rectangle(image, drect,rgb_pixel(255,0,0));
     }
@@ -372,17 +385,6 @@ int main(int argc, char** argv)
 
 	//for (int k=0; k<1000; k++) //for test fps
 	{
-		/*compute_HOGs( test_lst, test_gradients, win_size, false );
-		for(auto& src : test_gradients)
-		{
-			cv::Mat dst = src.reshape(1, 1);
-			cv::Mat predictMat(1, nEigens, CV_32FC1);
-			pca_trainer.project(dst, predictMat);
-			int ret = svm->predict(predictMat);
-			cout << ret << endl;
-
-			frames++;
-		}*/
 		for(auto& img : test_lst)
         {
             detect_object(img, pca_trainer, svm, nEigens, win_size);
