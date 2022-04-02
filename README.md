@@ -1,4 +1,4 @@
-# Hog Pca Svm Slider Nms cpp
+# Hog Pca Svm Slider Nms C++
 nms refer to: https://github.com/Nuzhny007/Non-Maximum-Suppression
 # Preinstall
 opencv dlib cpp  
