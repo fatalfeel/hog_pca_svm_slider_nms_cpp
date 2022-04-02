@@ -217,55 +217,55 @@ static void detect_object(matrix<rgb_pixel> image, cv::PCA& pca, Ptr<SVM>& svm, 
     	 *using one address send to pthread_create,
     	 *some of Thread_OneCorp will get same corp_pos*/
     	std::vector<uint32_t*> corp_pos_lst;
-    	for(uint32_t z=0; z<s_signal_num; z++)
-		{
-    		uint32_t* corp_pos = (uint32_t*)malloc(sizeof(uint32_t));
-    		//cout << "s1 " << corp_pos << endl;
-    		corp_pos_lst.push_back(corp_pos);
-    		*corp_pos	= strider*s_thread_num + z;
-    		pthread_create(&pthread_id, &pattr, Thread_OneCorp, (void*)corp_pos);
-		}
-    	pthread_mutex_lock(&s_main_lock);
-		pthread_cond_wait(&s_thread_cond, &s_main_lock);
-		pthread_mutex_unlock(&s_main_lock);
+        for(uint32_t z=0; z<s_signal_num; z++)
+        {
+            uint32_t* corp_pos = (uint32_t*)malloc(sizeof(uint32_t));
+            //cout << "s1 " << corp_pos << endl;
+            corp_pos_lst.push_back(corp_pos);
+            *corp_pos	= strider*s_thread_num + z;
+            pthread_create(&pthread_id, &pattr, Thread_OneCorp, (void*)corp_pos);
+        }
+        pthread_mutex_lock(&s_main_lock);
+        pthread_cond_wait(&s_thread_cond, &s_main_lock);
+        pthread_mutex_unlock(&s_main_lock);
 
-		for(uint32_t i=0; i<corp_pos_lst.size(); i++)
-		{
-			uint32_t* corp_pos = corp_pos_lst[i];
-			//cout << "s2 " << corp_pos << endl;
-			free(corp_pos);
-		}
-		corp_pos_lst.clear();
+        for(uint32_t i=0; i<corp_pos_lst.size(); i++)
+        {
+            uint32_t* corp_pos = corp_pos_lst[i];
+            //cout << "s2 " << corp_pos << endl;
+            free(corp_pos);
+        }
+        corp_pos_lst.clear();
 
-		for(uint32 i=0; i<s_hogdata_lst.size(); i++) //the most s_hogdata_lst is cpu threads number
-		{
-			CorpHog_t hog_data	= s_hogdata_lst[i];
-			feature_times 		= 0;
-			predict_socre 		= 0.0f;
+        for(uint32 i=0; i<s_hogdata_lst.size(); i++) //the most s_hogdata_lst is cpu threads number
+        {
+            CorpHog_t hog_data	= s_hogdata_lst[i];
+            feature_times 		= 0;
+            predict_socre 		= 0.0f;
 
-			for(uint32_t u=0; u<hog_data.feature_lst.size(); u+=4) //the most feature_lst is 31
-			{
-				cv::Mat dst = hog_data.feature_lst[u].reshape(1, 1);
-				pca.project(dst, predictMat);
+            for(uint32_t u=0; u<hog_data.feature_lst.size(); u+=4) //the most feature_lst is 31
+            {
+                cv::Mat dst = hog_data.feature_lst[u].reshape(1, 1);
+                pca.project(dst, predictMat);
 
-				if( svm->predict(predictMat) >= 1 )
-				{
-					predict_socre += 1.0f;
-					history_score += 1.0f;
-				}
+                if( svm->predict(predictMat) >= 1 )
+                {
+                    predict_socre += 1.0f;
+                    history_score += 1.0f;
+                }
 
-				feature_times++;
-			}
-			hog_data.feature_lst.clear(); //the most feature_lst is 31
+                feature_times++;
+            }
+            hog_data.feature_lst.clear(); //the most feature_lst is 31
 
-			if ( predict_socre / (float)feature_times >= thres_hold )
-			{
-				//cout << onehog.drect.left() << "," << onehog.drect.top() << "," << onehog.drect.right() << "," << onehog.drect.bottom() << endl;
-				p0 = cv::Point(hog_data.drect.left(),	hog_data.drect.top());
-				p1 = cv::Point(hog_data.drect.right(),	hog_data.drect.bottom());
-				srcRects.emplace_back(p0, p1);
-			}
-		}
+            if ( predict_socre / (float)feature_times >= thres_hold )
+            {
+                //cout << onehog.drect.left() << "," << onehog.drect.top() << "," << onehog.drect.right() << "," << onehog.drect.bottom() << endl;
+                p0 = cv::Point(hog_data.drect.left(),	hog_data.drect.top());
+                p1 = cv::Point(hog_data.drect.right(),	hog_data.drect.bottom());
+                srcRects.emplace_back(p0, p1);
+            }
+        }
 		s_hogdata_lst.clear(); //the most s_hogdata_lst is cpu threads number
 
 		strider++;
