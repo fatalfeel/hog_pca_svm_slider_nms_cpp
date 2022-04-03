@@ -311,7 +311,7 @@ static void detect_object(matrix<rgb_pixel> image, cv::PCA* pca, Ptr<SVM>* svm, 
     s_srcRects.clear();
 
     //test show
-    cout << "close window to end" << endl; 		//test
+    cout << "close window to end" << endl << endl; 		//test
     image_window iwin;
     iwin.set_image(image);
     iwin.wait_until_closed();
