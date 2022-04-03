@@ -23,24 +23,35 @@ using namespace dlib;
 
 typedef struct _CorpImage_t
 {
-    dlib::rectangle     drect;
-    matrix<rgb_pixel>   img_rgb;;
+	dlib::rectangle		drect;
+	matrix<rgb_pixel>   img_rgb;;
 }CorpImage_t;
 
 typedef struct _CorpHog_t
 {
-    dlib::rectangle         drect;
-    std::vector<cv::Mat>    feature_lst;
+	dlib::rectangle 		drect;
+	std::vector<cv::Mat>	feature_lst;
 }CorpHog_t;
 
-static int                  s_thread_num = 32;
-static volatile int         s_signal_num = 32; //must use volatile avoid release lock in cache
+typedef struct _PcaSvm_t
+{
+    uint32*     corp_pos;
+    cv::PCA*    pca;
+    Ptr<SVM>*   svm;
+    int         nEigens;
+    float       thres_hold;
+}PcaSvm_t;
+
+static int					s_thread_num    = 128;
+static volatile int			s_signal_num    = 128; //must use volatile avoid release lock in cache
+static volatile int  	    s_hog_done      = 0;
 std::vector<CorpImage_t>    s_corpdata_lst;
-std::vector<CorpHog_t>      s_hogdata_lst;
-pthread_mutex_t             s_main_lock;
-pthread_mutex_t             s_img_lock;
-pthread_mutex_t             s_hog_lock;
-pthread_cond_t              s_thread_cond;
+pthread_mutex_t 			s_main_lock;
+pthread_mutex_t 			s_img_lock;
+pthread_mutex_t 			s_hog_lock;
+pthread_mutex_t             s_rect_lock;
+pthread_cond_t 				s_thread_cond;
+std::vector<cv::Rect>       s_srcRects;
 
 static void load_images( const String& dirname, std::vector<matrix<rgb_pixel>>& img_lst, Size img_size, bool isTrain = true)
 {
@@ -66,18 +77,18 @@ static void load_images( const String& dirname, std::vector<matrix<rgb_pixel>>& 
 
         //hog + pca
         matrix<rgb_pixel> img_rgb;
-        load_image(img_rgb, files[i]);
+    	load_image(img_rgb, files[i]);
 
-        if( isTrain )
-        {
+    	if( isTrain )
+    	{
             if( img_rgb.nc() != img_size.width || img_rgb.nr() != img_size.height )
             {
                 dlib::matrix<float> size_mask(img_size.height,img_size.width);
                 dlib::resize_image(img_rgb, size_mask);
             }
-        }
+    	}
 
-        img_lst.push_back( img_rgb );
+    	img_lst.push_back( img_rgb );
     }
 }
 
@@ -109,13 +120,13 @@ static void compute_HOGs( std::vector<matrix<rgb_pixel>>& img_lst, std::vector<c
 
 static void get_OneHOG(matrix<rgb_pixel>& img, std::vector<cv::Mat>& gradient_lst)
 {
-    dlib::array<dlib::array2d<float>> planar_hog;
-    extract_fhog_features(img, planar_hog);
-    for(uint32_t u=0; u<planar_hog.size(); u+=4) //we don't need all size() 31 features so k+=4
-    {
-        cv::Mat cMat = toMat(planar_hog[u]);
-        gradient_lst.push_back(cMat.clone());
-    }
+	dlib::array<dlib::array2d<float>> planar_hog;
+	extract_fhog_features(img, planar_hog);
+	for(uint32_t u=0; u<planar_hog.size(); u+=4) //we don't need all size() 31 features so k+=4
+	{
+		cv::Mat cMat = toMat(planar_hog[u]);
+		gradient_lst.push_back(cMat.clone());
+	}
 }
 
 static void Image_Process(uint32_t corp_pos, CorpImage_t& corp_image)
@@ -127,64 +138,85 @@ static void Image_Process(uint32_t corp_pos, CorpImage_t& corp_image)
     pthread_mutex_unlock(&s_img_lock);
 }
 
-static void Hog_Process(CorpHog_t hog_data)
+static void Rect_Process(cv::Point p0, cv::Point p1)
+{
+    pthread_mutex_lock(&s_img_lock);
+
+    s_srcRects.emplace_back(p0, p1);;
+
+    pthread_mutex_unlock(&s_img_lock);
+}
+
+static void Hog_Process()
 {
     pthread_mutex_lock(&s_hog_lock);
 
-    s_hogdata_lst.push_back(hog_data);
+    s_hog_done++;
 
-    if(s_hogdata_lst.size() >= s_signal_num)
+    if(s_hog_done >= s_signal_num)
         pthread_cond_signal(&s_thread_cond);
 
     pthread_mutex_unlock(&s_hog_lock);
 }
 
-static void* Thread_OneCorp(void* arg)
+static void* Thread_CorpDetect(void* arg)
 {
+    PcaSvm_t*                           pcasvm = (PcaSvm_t*)arg;
+    int                                 feature_times;
+    float                               predict_socre;
+    cv::Point                           p0,p1;
     CorpHog_t                           hog_data;
     CorpImage_t                         corp_data;
     dlib::array<dlib::array2d<float>>   planar_hog;
+    cv::Mat                             predictMat(1, pcasvm->nEigens, CV_32FC1);
 
-    //corp_data = s_corpdata_lst[*(uint32_t*)arg];  //slower because system do lock
-    Image_Process(*(uint32_t*)arg, corp_data);      //faster because user do lock
-    //cout << "s3 " << arg << endl;
-    hog_data.drect = corp_data.drect;
-    //cout << "s2:" << hog_data.drect.left() << "," << hog_data.drect.top() << "," << hog_data.drect.right() << "," << hog_data.drect.bottom() << endl;
-    extract_fhog_features(corp_data.img_rgb, planar_hog);
-    for(uint32_t u=0; u<planar_hog.size(); u+=4) //we don't need all size() 31 features so k+=4
+	//corp_data = s_corpdata_lst[*(uint32_t*)arg];  //slower because system do lock
+	Image_Process(*pcasvm->corp_pos, corp_data);      //faster because user do lock
+	//cout << "s3 " << arg << endl;
+	extract_fhog_features(corp_data.img_rgb, planar_hog);
+
+	feature_times   = 0;
+	predict_socre   = 0.0f;
+	for(uint32_t u=0; u<planar_hog.size(); u+=4) //we don't need all size() 31 features so k+=4
+	{
+		cv::Mat cMat= toMat(planar_hog[u]);
+        cv::Mat dst = cMat.reshape(1, 1);
+
+        (*pcasvm->pca).project(dst, predictMat);
+
+        if( (*pcasvm->svm)->predict(predictMat) >= 1 )
+        {
+            predict_socre += 1.0f;
+        }
+
+        feature_times++;
+	}
+
+	if ( predict_socre / (float)feature_times >= pcasvm->thres_hold )
     {
-        cv::Mat cMat = toMat(planar_hog[u]);
-        hog_data.feature_lst.push_back(cMat.clone());
+        //cout << onehog.drect.left() << "," << onehog.drect.top() << "," << onehog.drect.right() << "," << onehog.drect.bottom() << endl;
+        p0 = cv::Point(corp_data.drect.left(),   corp_data.drect.top());
+        p1 = cv::Point(corp_data.drect.right(),  corp_data.drect.bottom());
+        //srcRects.emplace_back(p0, p1);
+        Rect_Process(p0, p1);
     }
 
-    Hog_Process(hog_data);
+	//if ( predict_socre > 1.0f )
+	//    cout << corp_data.drect.left() << "," << corp_data.drect.top() << "," << corp_data.drect.right() << "," << corp_data.drect.bottom() << ": " << predict_socre << endl;
+
+	Hog_Process();
 
     return NULL;
 }
 
-//static void detect_object(matrix<rgb_pixel>& image, cv::PCA& pca, Ptr<SVM>& svm, int nEigens, Size win_size, float thres_hold = 0.01f)
-static void detect_object(matrix<rgb_pixel> image, cv::PCA& pca, Ptr<SVM>& svm, int nEigens, Size win_size, float thres_hold = 0.2f) //no &image will keep original
+static void get_CorpImage(matrix<rgb_pixel> image, Size win_size)
 {
-    int                     feature_times;
-    float                   predict_socre;
-    float                   history_score;
-    cv::Mat                 predictMat(1, nEigens, CV_32FC1);
-    cv::Point               p0,p1;
-    std::vector<cv::Rect>   srcRects;
-    std::vector<cv::Rect>   dstRects;
-    int                     windows_n_rows  = win_size.height;
-    int                     windows_n_cols  = win_size.width;
-    int                     StepSlide_row   = 32;
-    int                     StepSlide_col   = 64;
-    pthread_attr_t          pattr;
-    pthread_t               pthread_id;
-    matrix<rgb_pixel>           clip_img;
-    CorpImage_t                 corp_data;
-
-    pthread_attr_init(&pattr);
-    pthread_attr_setdetachstate(&pattr, PTHREAD_CREATE_DETACHED);
-
-    history_score = 0.0f;
+    int                 windows_n_rows  = win_size.height;
+    int                 windows_n_cols  = win_size.width;
+    int                 StepSlide_row   = 32;
+    int                 StepSlide_col   = 32;
+    matrix<rgb_pixel>   clip_img;
+    CorpImage_t         corp_data;
 
     for (int row = 0; row <= image.nr()- windows_n_rows; row += StepSlide_row)
     {
@@ -202,9 +234,29 @@ static void detect_object(matrix<rgb_pixel> image, cv::PCA& pca, Ptr<SVM>& svm, 
             s_corpdata_lst.push_back(corp_data);
         }
     }
+}
 
-    uint32_t    strider     = 0;
-    uint32_t    remain_size = s_corpdata_lst.size();
+//static void detect_object(matrix<rgb_pixel>& image, cv::PCA& pca, Ptr<SVM>& svm, int nEigens, Size win_size, float thres_hold = 0.01f)
+static void detect_object(matrix<rgb_pixel> image, cv::PCA* pca, Ptr<SVM>* svm, int nEigens, Size win_size, float thres_hold = 0.2f)
+{
+    int                     feature_times;
+    //float                	predict_socre;
+    //float                	history_score;
+    cv::Mat             	predictMat(1, nEigens, CV_32FC1);
+    cv::Point               p0,p1;
+    std::vector<cv::Rect> 	dstRects;
+    pthread_attr_t          pattr;
+    pthread_t               pthread_id;
+
+    pthread_attr_init(&pattr);
+    pthread_attr_setdetachstate(&pattr, PTHREAD_CREATE_DETACHED);
+
+    get_CorpImage(image, win_size);
+
+    //history_score = 0.0f;
+
+    uint32_t 	strider		= 0;
+    uint32_t 	remain_size	= s_corpdata_lst.size();
     while( remain_size > 0 )
     {
         if( remain_size >= s_thread_num )
@@ -212,78 +264,54 @@ static void detect_object(matrix<rgb_pixel> image, cv::PCA& pca, Ptr<SVM>& svm, 
         else
             s_signal_num = remain_size;
 
-        /*must malloc memory pointer to pthread_create,
-         *using one address send to pthread_create,
-         *some of Thread_OneCorp will get same corp_pos*/
-        std::vector<uint32_t*> corp_pos_lst;
+    	/*must malloc memory pointer to pthread_create,
+    	 *using one address send to pthread_create,
+    	 *some of Thread_CorpDetect will get same corp_pos*/
+    	std::vector<PcaSvm_t*> pca_svm_lst;
         for(uint32_t z=0; z<s_signal_num; z++)
         {
-            uint32_t* corp_pos = (uint32_t*)malloc(sizeof(uint32_t));
+            PcaSvm_t*   pcasvm  = (PcaSvm_t*)malloc(sizeof(PcaSvm_t));
+            pcasvm->corp_pos    = (uint32_t*)malloc(sizeof(uint32_t));
             //cout << "s1 " << corp_pos << endl;
-            corp_pos_lst.push_back(corp_pos);
-            *corp_pos   = strider*s_thread_num + z;
-            pthread_create(&pthread_id, &pattr, Thread_OneCorp, (void*)corp_pos);
+            *pcasvm->corp_pos   = strider*s_thread_num + z;
+            pcasvm->pca         = pca;
+            pcasvm->svm         = svm;
+            pcasvm->nEigens     = nEigens;
+            pcasvm->thres_hold  = thres_hold;
+            pca_svm_lst.push_back(pcasvm);
+
+            pthread_create(&pthread_id, &pattr, Thread_CorpDetect, (void*)pcasvm);
         }
         pthread_mutex_lock(&s_main_lock);
         pthread_cond_wait(&s_thread_cond, &s_main_lock);
         pthread_mutex_unlock(&s_main_lock);
 
-        for(uint32_t i=0; i<corp_pos_lst.size(); i++)
+        for(uint32_t i=0; i<pca_svm_lst.size(); i++)
         {
-            uint32_t* corp_pos = corp_pos_lst[i];
+            PcaSvm_t* pcasvm = pca_svm_lst[i];
             //cout << "s2 " << corp_pos << endl;
-            free(corp_pos);
+            free(pcasvm->corp_pos);
+            free(pcasvm);
         }
-        corp_pos_lst.clear();
-
-        for(uint32 i=0; i<s_hogdata_lst.size(); i++) //the most s_hogdata_lst is cpu threads number
-        {
-            CorpHog_t hog_data  = s_hogdata_lst[i];
-            feature_times       = 0;
-            predict_socre       = 0.0f;
-
-            for(uint32_t u=0; u<hog_data.feature_lst.size(); u+=4) //the most feature_lst is 31
-            {
-                cv::Mat dst = hog_data.feature_lst[u].reshape(1, 1);
-                pca.project(dst, predictMat);
-
-                if( svm->predict(predictMat) >= 1 )
-                {
-                    predict_socre += 1.0f;
-                    history_score += 1.0f;
-                }
-
-                feature_times++;
-            }
-            hog_data.feature_lst.clear(); //the most feature_lst is 31
-
-            if ( predict_socre / (float)feature_times >= thres_hold )
-            {
-                //cout << onehog.drect.left() << "," << onehog.drect.top() << "," << onehog.drect.right() << "," << onehog.drect.bottom() << endl;
-                p0 = cv::Point(hog_data.drect.left(),   hog_data.drect.top());
-                p1 = cv::Point(hog_data.drect.right(),  hog_data.drect.bottom());
-                srcRects.emplace_back(p0, p1);
-            }
-        }
-        s_hogdata_lst.clear(); //the most s_hogdata_lst is cpu threads number
+        pca_svm_lst.clear();
+        s_hog_done = 0;
 
         strider++;
         remain_size -= s_signal_num;
     }
     s_corpdata_lst.clear();
 
-    cout << "hscore: " << history_score << endl; //test
-
-    nms(srcRects, dstRects, 0.2f, 0);
+    nms(s_srcRects, dstRects, 0.2f, 0);
     for( int i=0; i<dstRects.size(); i++)
     {
-        cv::Rect r = dstRects[i];
-        dlib::rectangle drect(r.tl().x, r.tl().y, r.br().x, r.br().y);
-        dlib::draw_rectangle(image, drect,rgb_pixel(255,0,0));
+    	cv::Rect r = dstRects[i];
+    	dlib::rectangle drect(r.tl().x, r.tl().y, r.br().x, r.br().y);
+    	dlib::draw_rectangle(image, drect,rgb_pixel(255,0,0));
     }
+    s_srcRects.clear();
 
     //test show
-    cout << "close window to end" << endl;      //test
+    cout << "close window to end" << endl; 		//test
     image_window iwin;
     iwin.set_image(image);
     iwin.wait_until_closed();
@@ -319,9 +347,10 @@ int main(int argc, char** argv)
     std::vector<cv::Mat>            train_gradients, test_gradients;
     Size                            win_size = Size(128, 256);
 
-    pthread_mutex_init(&s_main_lock,NULL);
-    pthread_mutex_init(&s_img_lock, NULL);
+	pthread_mutex_init(&s_main_lock,NULL);
+	pthread_mutex_init(&s_img_lock, NULL);
     pthread_mutex_init(&s_hog_lock,NULL);
+    pthread_mutex_init(&s_rect_lock,NULL);
     pthread_cond_init(&s_thread_cond,NULL);
 
     load_images("./pos", pos_lst, win_size);
@@ -365,42 +394,43 @@ int main(int argc, char** argv)
     svm->setType(SVM::C_SVC);
     svm->setKernel( SVM::RBF );
     svm->setGamma(0.55); //lower more boxes
-    //svm->setCoef0(1.0);
-    svm->setC(1.5);     //lower more boxes
-    //svm->setNu(0.5);
-    //svm->setP(1.0);
-    svm->setTermCriteria( TermCriteria( CV_TERMCRIT_ITER+CV_TERMCRIT_EPS, 1000000, FLT_EPSILON ));
+	//svm->setCoef0(1.0);
+	svm->setC(1.5);     //lower more boxes
+	//svm->setNu(0.5);
+	//svm->setP(1.0);
+	svm->setTermCriteria( TermCriteria( CV_TERMCRIT_ITER+CV_TERMCRIT_EPS, 1000000, FLT_EPSILON ));
     svm->train( data, ROW_SAMPLE, labels );
     //svm->save("svm_data.xml");
     //svm->load("svm_data.xml");
 
     printf("test start\n");
     load_images("./test", test_lst, win_size, false);
-    uint64_t        frames = 0;
-    double          elapsed,fps;
-    struct timespec t1, t2;
-    clock_gettime(CLOCK_REALTIME, &t1);
+    uint64_t		frames = 0;
+	double 			elapsed,fps;
+	struct timespec t1, t2;
+	clock_gettime(CLOCK_REALTIME, &t1);
 
-    //for (int k=0; k<1000; k++) //for test fps
-    {
-        for(auto& img : test_lst)
+	//for (int k=0; k<100; k++) //for test fps
+	{
+		for(auto& img : test_lst)
         {
-            detect_object(img, pca_trainer, svm, nEigens, win_size);
+            detect_object(img, &pca_trainer, &svm, nEigens, win_size);
             frames++;
         }
-    }
+	}
 
     clock_gettime(CLOCK_REALTIME, &t2);
-    elapsed = ((t2.tv_sec - t1.tv_sec) * 1000000000 + t2.tv_nsec - t1.tv_nsec) / 1000000000.0;
-    fps     = frames / elapsed;
-    printf("detected frames=%lu\nelapsed time=%f\nfps=%f\n", frames, elapsed, fps);
+	elapsed = ((t2.tv_sec - t1.tv_sec) * 1000000000 + t2.tv_nsec - t1.tv_nsec) / 1000000000.0;
+	fps 	= frames / elapsed;
+	printf("detected frames=%lu\nelapsed time=%f\nfps=%f\n", frames, elapsed, fps);
 
-    pthread_cond_destroy(&s_thread_cond);
-    pthread_mutex_destroy(&s_hog_lock);
-    pthread_mutex_destroy(&s_img_lock);
-    pthread_mutex_destroy(&s_main_lock);
+	pthread_cond_destroy(&s_thread_cond);
+	pthread_mutex_destroy(&s_rect_lock);
+	pthread_mutex_destroy(&s_hog_lock);
+	pthread_mutex_destroy(&s_img_lock);
+	pthread_mutex_destroy(&s_main_lock);
 
-    return EXIT_SUCCESS;
+	return EXIT_SUCCESS;
 }
 
 // ----------------------------------------------------------------------------------------
