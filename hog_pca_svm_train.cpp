@@ -201,7 +201,7 @@ static void* Thread_CorpDetect(void* arg)
         Rect_Process(p0, p1);
     }
 
-	//if ( predict_socre > 1.0f )
+	//if ( predict_socre > 1.0f ) //test for score
 	//    cout << corp_data.drect.left() << "," << corp_data.drect.top() << "," << corp_data.drect.right() << "," << corp_data.drect.bottom() << ": " << predict_socre << endl;
 
 	CorpDone_Process();
