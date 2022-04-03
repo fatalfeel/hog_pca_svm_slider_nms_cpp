@@ -42,9 +42,9 @@ typedef struct _PcaSvm_t
     float       thres_hold;
 }PcaSvm_t;
 
-static int					s_thread_num    = 128;
-static volatile int			s_signal_num    = 128; //must use volatile avoid release lock in cache
-static volatile int  	    s_hog_done      = 0;
+static int                  s_thread_num    = 128;
+static volatile int         s_signal_num    = 128; //must use volatile avoid release lock in cache
+static volatile int         s_corp_done     = 0;
 std::vector<CorpImage_t>    s_corpdata_lst;
 pthread_mutex_t 			s_main_lock;
 pthread_mutex_t 			s_img_lock;
@@ -147,13 +147,13 @@ static void Rect_Process(cv::Point p0, cv::Point p1)
     pthread_mutex_unlock(&s_img_lock);
 }
 
-static void Hog_Process()
+static void CorpDone_Process()
 {
     pthread_mutex_lock(&s_hog_lock);
 
-    s_hog_done++;
+    s_corp_done++;
 
-    if(s_hog_done >= s_signal_num)
+    if(s_corp_done >= s_signal_num)
         pthread_cond_signal(&s_thread_cond);
 
     pthread_mutex_unlock(&s_hog_lock);
@@ -204,7 +204,7 @@ static void* Thread_CorpDetect(void* arg)
 	//if ( predict_socre > 1.0f )
 	//    cout << corp_data.drect.left() << "," << corp_data.drect.top() << "," << corp_data.drect.right() << "," << corp_data.drect.bottom() << ": " << predict_socre << endl;
 
-	Hog_Process();
+	CorpDone_Process();
 
     return NULL;
 }
@@ -285,6 +285,7 @@ static void detect_object(matrix<rgb_pixel> image, cv::PCA* pca, Ptr<SVM>* svm, 
         pthread_mutex_lock(&s_main_lock);
         pthread_cond_wait(&s_thread_cond, &s_main_lock);
         pthread_mutex_unlock(&s_main_lock);
+        s_corp_done = 0;
 
         for(uint32_t i=0; i<pca_svm_lst.size(); i++)
         {
@@ -294,7 +295,6 @@ static void detect_object(matrix<rgb_pixel> image, cv::PCA* pca, Ptr<SVM>* svm, 
             free(pcasvm);
         }
         pca_svm_lst.clear();
-        s_hog_done = 0;
 
         strider++;
         remain_size -= s_signal_num;
