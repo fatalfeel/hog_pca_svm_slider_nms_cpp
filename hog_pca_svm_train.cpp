@@ -118,7 +118,7 @@ static void get_OneHOG(matrix<rgb_pixel>& img, std::vector<cv::Mat>& gradient_ls
 	}
 }
 
-static void Image_Process(int corp_pos, CorpImage_t& corp_image)
+static void Image_Process(uint32_t corp_pos, CorpImage_t& corp_image)
 {
     pthread_mutex_lock(&s_img_lock);
 
@@ -141,13 +141,13 @@ static void Hog_Process(CorpHog_t hog_data)
 
 static void* Thread_OneCorp(void* arg)
 {
-	CorpHog_t 							hog_data;
-	CorpImage_t							corp_data;
-	dlib::array<dlib::array2d<float>> 	planar_hog;
+    CorpHog_t                           hog_data;
+    CorpImage_t                         corp_data;
+    dlib::array<dlib::array2d<float>>   planar_hog;
 
-	Image_Process(*(uint32_t*)arg, corp_data);
+	//corp_data = s_corpdata_lst[*(uint32_t*)arg];  //slower because system do lock
+	Image_Process(*(uint32_t*)arg, corp_data);      //faster because user do lock
 	//cout << "s3 " << arg << endl;
-
 	hog_data.drect = corp_data.drect;
 	//cout << "s2:" << hog_data.drect.left() << "," << hog_data.drect.top() << "," << hog_data.drect.right() << "," << hog_data.drect.bottom() << endl;
 	extract_fhog_features(corp_data.img_rgb, planar_hog);
