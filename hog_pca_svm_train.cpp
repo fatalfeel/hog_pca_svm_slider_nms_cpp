@@ -163,7 +163,7 @@ static void* Thread_OneCorp(void* arg)
 }
 
 //static void detect_object(matrix<rgb_pixel>& image, cv::PCA& pca, Ptr<SVM>& svm, int nEigens, Size win_size, float thres_hold = 0.01f)
-static void detect_object(matrix<rgb_pixel> image, cv::PCA& pca, Ptr<SVM>& svm, int nEigens, Size win_size, float thres_hold = 0.01f) //no &image will keep original
+static void detect_object(matrix<rgb_pixel> image, cv::PCA& pca, Ptr<SVM>& svm, int nEigens, Size win_size, float thres_hold = 0.2f) //no &image will keep original
 {
     int                     feature_times;
     float                	predict_socre;
@@ -275,7 +275,7 @@ static void detect_object(matrix<rgb_pixel> image, cv::PCA& pca, Ptr<SVM>& svm, 
 
     cout << "hscore: " << history_score << endl; //test
 
-    nms(srcRects, dstRects, 0.3f, 0);
+    nms(srcRects, dstRects, 0.2f, 0);
     for( int i=0; i<dstRects.size(); i++)
     {
     	cv::Rect r = dstRects[i];
