@@ -179,7 +179,6 @@ static void detect_object(matrix<rgb_pixel> image, cv::PCA& pca, Ptr<SVM>& svm, 
     pthread_attr_t          pattr;
     pthread_t               pthread_id;
     matrix<rgb_pixel>   		clip_img;
-    std::vector<CorpImage_t>	corpdata_lst;
     CorpImage_t					corp_data;
 
     pthread_attr_init(&pattr);
