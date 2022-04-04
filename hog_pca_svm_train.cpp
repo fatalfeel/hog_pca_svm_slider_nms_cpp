@@ -40,11 +40,11 @@ static int                  s_thread_num    = 128;
 static volatile int         s_signal_num    = 128; //must use volatile avoid release lock in cache
 static volatile int         s_corp_done     = 0;
 std::vector<CorpImage_t>    s_corpdata_lst;
-pthread_mutex_t 			s_main_lock;
-pthread_mutex_t 			s_img_lock;
+pthread_mutex_t             s_main_lock;
+pthread_mutex_t             s_img_lock;
 pthread_mutex_t             s_rect_lock;
 pthread_mutex_t             s_corp_lock;
-pthread_cond_t 				s_thread_cond;
+pthread_cond_t              s_thread_cond;
 std::vector<cv::Rect>       s_srcRects;
 
 static void load_images( const String& dirname, std::vector<matrix<rgb_pixel>>& img_lst, Size img_size, bool isTrain = true)
