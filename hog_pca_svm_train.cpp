@@ -129,6 +129,33 @@ static void get_OneHOG(matrix<rgb_pixel>& img, std::vector<cv::Mat>& gradient_ls
 	}
 }
 
+static void get_CorpImage(matrix<rgb_pixel> image, Size win_size)
+{
+    int                 windows_n_rows  = win_size.height;
+    int                 windows_n_cols  = win_size.width;
+    int                 StepSlide_row   = 32;
+    int                 StepSlide_col   = 32;
+    matrix<rgb_pixel>   clip_img;
+    CorpImage_t         corp_data;
+
+    for (int row = 0; row <= image.nr()- windows_n_rows; row += StepSlide_row)
+    {
+        for (int col = 0; col <= image.nc() - windows_n_cols; col += StepSlide_col)
+        {
+            dlib::rectangle drect(col, row, col+windows_n_cols-1, row+windows_n_rows-1);
+            /*drect.set_left(col);
+            drect.set_top(row);
+            drect.set_right(col+windows_n_cols-1);
+            drect.set_bottom(row+windows_n_rows-1);*/
+
+            extract_image_chip(image, drect, clip_img);
+            corp_data.drect     = drect;
+            corp_data.img_rgb   = clip_img;
+            s_corpdata_lst.push_back(corp_data);
+        }
+    }
+}
+
 static void Image_Process(uint32_t corp_pos, CorpImage_t& corp_image)
 {
     pthread_mutex_lock(&s_img_lock);
@@ -207,33 +234,6 @@ static void* Thread_CorpDetect(void* arg)
 	CorpDone_Process();
 
     return NULL;
-}
-
-static void get_CorpImage(matrix<rgb_pixel> image, Size win_size)
-{
-    int                 windows_n_rows  = win_size.height;
-    int                 windows_n_cols  = win_size.width;
-    int                 StepSlide_row   = 32;
-    int                 StepSlide_col   = 32;
-    matrix<rgb_pixel>   clip_img;
-    CorpImage_t         corp_data;
-
-    for (int row = 0; row <= image.nr()- windows_n_rows; row += StepSlide_row)
-    {
-        for (int col = 0; col <= image.nc() - windows_n_cols; col += StepSlide_col)
-        {
-            dlib::rectangle drect(col, row, col+windows_n_cols-1, row+windows_n_rows-1);
-            /*drect.set_left(col);
-            drect.set_top(row);
-            drect.set_right(col+windows_n_cols-1);
-            drect.set_bottom(row+windows_n_rows-1);*/
-
-            extract_image_chip(image, drect, clip_img);
-            corp_data.drect     = drect;
-            corp_data.img_rgb   = clip_img;
-            s_corpdata_lst.push_back(corp_data);
-        }
-    }
 }
 
 //static void detect_object(matrix<rgb_pixel>& image, cv::PCA& pca, Ptr<SVM>& svm, int nEigens, Size win_size, float thres_hold = 0.01f)
