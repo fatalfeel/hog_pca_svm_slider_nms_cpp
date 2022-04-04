@@ -29,11 +29,11 @@ typedef struct _CorpImage_t
 
 typedef struct _PcaSvm_t
 {
-    uint32*     corp_pos;
-    cv::PCA*    pca;
-    Ptr<SVM>*   svm;
+    uint32      corp_pos;
     int         nEigens;
     float       thres_hold;
+    cv::PCA*    pca;
+    Ptr<SVM>*   svm;
 }PcaSvm_t;
 
 static int                  s_thread_num    = 128;
@@ -180,7 +180,7 @@ static void* Thread_CorpDetect(void* arg)
     cv::Mat                             predictMat(1, pcasvm->nEigens, CV_32FC1);
 
 	//corp_data = s_corpdata_lst[*(uint32_t*)arg];  //slower because system do lock
-    Image_Process(*pcasvm->corp_pos, corp_data);    //faster because user do lock
+    Image_Process(pcasvm->corp_pos, corp_data);    //faster because user do lock
     //cout << "s3: " << arg << endl;
     extract_fhog_features(corp_data.img_rgb, planar_hog);
 
@@ -252,10 +252,9 @@ static void detect_object(matrix<rgb_pixel> image, cv::PCA* pca, Ptr<SVM>* svm, 
     	std::vector<PcaSvm_t*> pca_svm_lst;
         for(uint32_t z=0; z<s_signal_num; z++)
         {
-            PcaSvm_t*   pcasvm  = (PcaSvm_t*)malloc(sizeof(PcaSvm_t));
-            pcasvm->corp_pos    = (uint32_t*)malloc(sizeof(uint32_t));
+            PcaSvm_t* pcasvm    = (PcaSvm_t*)malloc(sizeof(PcaSvm_t));
             //cout << "s1 " << corp_pos << endl;
-            *pcasvm->corp_pos   = strider*s_thread_num + z;
+            pcasvm->corp_pos    = strider*s_thread_num + z;
             pcasvm->pca         = pca;
             pcasvm->svm         = svm;
             pcasvm->nEigens     = nEigens;
@@ -272,8 +271,6 @@ static void detect_object(matrix<rgb_pixel> image, cv::PCA* pca, Ptr<SVM>* svm, 
         for(uint32_t i=0; i<pca_svm_lst.size(); i++)
         {
             PcaSvm_t* pcasvm = pca_svm_lst[i];
-            //cout << "s2 " << corp_pos << endl;
-            free(pcasvm->corp_pos);
             free(pcasvm);
         }
         pca_svm_lst.clear();
