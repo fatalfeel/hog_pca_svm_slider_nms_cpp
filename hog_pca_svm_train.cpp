@@ -48,8 +48,8 @@ static volatile int         s_corp_done     = 0;
 std::vector<CorpImage_t>    s_corpdata_lst;
 pthread_mutex_t 			s_main_lock;
 pthread_mutex_t 			s_img_lock;
-pthread_mutex_t 			s_hog_lock;
 pthread_mutex_t             s_rect_lock;
+pthread_mutex_t             s_corp_lock;
 pthread_cond_t 				s_thread_cond;
 std::vector<cv::Rect>       s_srcRects;
 
@@ -156,23 +156,23 @@ static void Image_Process(uint32_t corp_pos, CorpImage_t& corp_image)
 
 static void Rect_Process(cv::Point p0, cv::Point p1)
 {
-    pthread_mutex_lock(&s_img_lock);
+    pthread_mutex_lock(&s_rect_lock);
 
-    s_srcRects.emplace_back(p0, p1);;
+    s_srcRects.emplace_back(p0, p1);
 
-    pthread_mutex_unlock(&s_img_lock);
+    pthread_mutex_unlock(&s_rect_lock);
 }
 
 static void CorpDone_Process()
 {
-    pthread_mutex_lock(&s_hog_lock);
+    pthread_mutex_lock(&s_corp_lock);
 
     s_corp_done++;
 
     if(s_corp_done >= s_signal_num)
         pthread_cond_signal(&s_thread_cond);
 
-    pthread_mutex_unlock(&s_hog_lock);
+    pthread_mutex_unlock(&s_corp_lock);
 }
 
 static void* Thread_CorpDetect(void* arg)
@@ -338,8 +338,8 @@ int main(int argc, char** argv)
 
 	pthread_mutex_init(&s_main_lock,NULL);
 	pthread_mutex_init(&s_img_lock, NULL);
-    pthread_mutex_init(&s_hog_lock,NULL);
     pthread_mutex_init(&s_rect_lock,NULL);
+    pthread_mutex_init(&s_corp_lock,NULL);
     pthread_cond_init(&s_thread_cond,NULL);
 
     load_images("./pos", pos_lst, win_size);
@@ -383,11 +383,11 @@ int main(int argc, char** argv)
     svm->setType(SVM::C_SVC);
     svm->setKernel( SVM::RBF );
     svm->setGamma(0.55); //lower more boxes
-	//svm->setCoef0(1.0);
-	svm->setC(1.5);     //lower more boxes
-	//svm->setNu(0.5);
-	//svm->setP(1.0);
-	svm->setTermCriteria( TermCriteria( CV_TERMCRIT_ITER+CV_TERMCRIT_EPS, 1000000, FLT_EPSILON ));
+    //svm->setCoef0(1.0);
+    svm->setC(1.5);     //lower more boxes
+    //svm->setNu(0.5);
+    //svm->setP(1.0);
+    svm->setTermCriteria( TermCriteria( CV_TERMCRIT_ITER+CV_TERMCRIT_EPS, 1000000, FLT_EPSILON ));
     svm->train( data, ROW_SAMPLE, labels );
     //svm->save("svm_data.xml");
     //svm->load("svm_data.xml");
@@ -414,8 +414,8 @@ int main(int argc, char** argv)
     printf("detected frames=%lu\nelapsed time=%f\nfps=%f\n", frames, elapsed, fps);
 
     pthread_cond_destroy(&s_thread_cond);
+    pthread_mutex_destroy(&s_corp_lock);
     pthread_mutex_destroy(&s_rect_lock);
-    pthread_mutex_destroy(&s_hog_lock);
     pthread_mutex_destroy(&s_img_lock);
     pthread_mutex_destroy(&s_main_lock);
 
