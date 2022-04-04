@@ -27,12 +27,6 @@ typedef struct _CorpImage_t
 	matrix<rgb_pixel>   img_rgb;;
 }CorpImage_t;
 
-typedef struct _CorpHog_t
-{
-	dlib::rectangle 		drect;
-	std::vector<cv::Mat>	feature_lst;
-}CorpHog_t;
-
 typedef struct _PcaSvm_t
 {
     uint32*     corp_pos;
@@ -181,7 +175,6 @@ static void* Thread_CorpDetect(void* arg)
     int                                 feature_times;
     float                               predict_socre;
     cv::Point                           p0,p1;
-    CorpHog_t                           hog_data;
     CorpImage_t                         corp_data;
     dlib::array<dlib::array2d<float>>   planar_hog;
     cv::Mat                             predictMat(1, pcasvm->nEigens, CV_32FC1);
