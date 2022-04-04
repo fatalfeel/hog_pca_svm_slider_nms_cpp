@@ -21,10 +21,16 @@ using namespace cv;
 using namespace cv::ml;
 using namespace dlib;
 
+typedef struct _TrainSet_t
+{
+    uint32  img_label;
+    uint32  corp_pos;
+}TrainSet_t;
+
 typedef struct _CorpImage_t
 {
 	dlib::rectangle		drect;
-	matrix<rgb_pixel>   img_rgb;;
+	matrix<rgb_pixel>   img_rgb;
 }CorpImage_t;
 
 typedef struct _PcaSvm_t
@@ -36,16 +42,26 @@ typedef struct _PcaSvm_t
     Ptr<SVM>*   svm;
 }PcaSvm_t;
 
-static int                  s_thread_num    = 128;
-static volatile int         s_signal_num    = 128; //must use volatile avoid release lock in cache
-static volatile int         s_corp_done     = 0;
-std::vector<CorpImage_t>    s_corpdata_lst;
-pthread_mutex_t             s_main_lock;
-pthread_mutex_t             s_img_lock;
-pthread_mutex_t             s_rect_lock;
-pthread_mutex_t             s_corp_lock;
-pthread_cond_t              s_thread_cond;
-std::vector<cv::Rect>       s_srcRects;
+static int                      s_thread_num    = 128;
+static volatile int             s_signal_num    = 128; //must use volatile avoid release lock in cache
+static volatile int             s_hogs_done     = 0;
+static volatile int             s_corp_done     = 0;
+std::vector<matrix<rgb_pixel>>  s_pos_lst;
+std::vector<matrix<rgb_pixel>>  s_neg_lst;
+std::vector<cv::Mat>            s_trainfhogs_lst;
+std::vector<CorpImage_t>        s_corpdata_lst;
+pthread_mutex_t                 s_main_lock;
+////////////////////////////////////////////////////
+pthread_mutex_t                 s_train_lock;
+pthread_mutex_t                 s_planar_lock;
+pthread_mutex_t                 s_hogs_lock;
+////////////////////////////////////////////////////
+pthread_mutex_t                 s_img_lock;
+pthread_mutex_t                 s_rect_lock;
+pthread_mutex_t                 s_corp_lock;
+pthread_cond_t                  s_hogs_thread_cond;
+pthread_cond_t                  s_corp_thread_cond;
+std::vector<cv::Rect>           s_srcRects;
 
 static void load_images( const String& dirname, std::vector<matrix<rgb_pixel>>& img_lst, Size img_size, bool isTrain = true)
 {
@@ -86,22 +102,73 @@ static void load_images( const String& dirname, std::vector<matrix<rgb_pixel>>& 
     }
 }
 
-static void compute_HOGs( std::vector<matrix<rgb_pixel>>& img_lst, std::vector<cv::Mat>& gradient_lst, Size win_size, bool use_flip )
+///////////////////////////////////////////////////////////////////////
+/////////////////////////////////Train/////////////////////////////////
+///////////////////////////////////////////////////////////////////////
+static void TrainData_Process(int img_label, uint32_t corp_pos, matrix<rgb_pixel>& img_rgb)
 {
-    for( size_t i = 0 ; i < img_lst.size(); i++ )
-    {
-        /*array2d<matrix<float,31,1>> hog;
-        extract_fhog_features(img_lst[i], hog);
-        float* ptrMat = (float*)image_data(hog);
-        for(int k=0; k<31; k++)
-        {
-            cv::Mat cMat = cv::Mat(hog.nr(), hog.nc(), CV_32FC1, ptrMat);
-            gradient_lst.push_back(cMat.clone());
-            ptrMat += hog.nr() * hog.nc();
-        }
-        gradient_lst.push_back(cMat.clone());
-        //cout << "ok" << endl;*/
+    pthread_mutex_lock(&s_train_lock);
 
+    switch(img_label)
+    {
+        case  1:
+            img_rgb = s_pos_lst[corp_pos];
+            break;
+        case -1:
+            img_rgb = s_neg_lst[corp_pos];
+            break;
+    }
+
+    pthread_mutex_unlock(&s_train_lock);
+}
+
+static void Planar_Process(cv::Mat cMat)
+{
+    pthread_mutex_lock(&s_planar_lock);
+
+    s_trainfhogs_lst.push_back(cMat.clone());
+
+    pthread_mutex_unlock(&s_planar_lock);
+}
+
+static void HogDone_Process()
+{
+    pthread_mutex_lock(&s_hogs_lock);
+
+    s_hogs_done++;
+
+    if(s_hogs_done >= s_signal_num)
+        pthread_cond_signal(&s_hogs_thread_cond);
+
+    pthread_mutex_unlock(&s_hogs_lock);
+}
+
+static void* Thread_ComputeHogs(void* arg)
+{
+    TrainSet_t*                         train_one = (TrainSet_t*)arg;
+    matrix<rgb_pixel>                   img_rgb;
+    dlib::array<dlib::array2d<float>>   planar_hog;
+
+    //cout << "s1: " << train_one->corp_pos << endl; //debug
+
+    TrainData_Process(train_one->img_label, train_one->corp_pos, img_rgb);
+    extract_fhog_features(img_rgb, planar_hog);
+
+    for(uint32_t u=0; u<planar_hog.size(); u+=4) //we don't need all size() 31 features so k+=4
+    {
+        cv::Mat cMat= toMat(planar_hog[u]);
+        Planar_Process(cMat);
+    }
+
+    HogDone_Process();
+
+    return NULL;
+}
+
+static void compute_HOGs( int img_label, std::vector<matrix<rgb_pixel>>& img_lst, Size win_size )
+{
+    /*for( size_t i = 0 ; i < img_lst.size(); i++ )
+    {
         dlib::array<dlib::array2d<float>> planar_hog;
         extract_fhog_features(img_lst[i], planar_hog);
         for(uint32_t u=0; u<planar_hog.size(); u+=4) //we don't need all size() 31 features so k+=4
@@ -109,9 +176,54 @@ static void compute_HOGs( std::vector<matrix<rgb_pixel>>& img_lst, std::vector<c
             cv::Mat cMat = toMat(planar_hog[u]);
             gradient_lst.push_back(cMat.clone());
         }
+    }*/
+    pthread_attr_t  pattr;
+    pthread_t       pthread_id;
+
+    pthread_attr_init(&pattr);
+    pthread_attr_setdetachstate(&pattr, PTHREAD_CREATE_DETACHED);
+
+    uint32_t    strider     = 0;
+    uint32_t    remain_size = img_lst.size();
+    while( remain_size > 0 )
+    {
+        if( remain_size >= s_thread_num )
+            s_signal_num = s_thread_num;
+        else
+            s_signal_num = remain_size;
+
+        std::vector<TrainSet_t*> trainset_lst;
+        for(uint32_t z=0; z<s_signal_num; z++)
+        {
+            TrainSet_t* train_one   = (TrainSet_t*)malloc(sizeof(TrainSet_t));
+            train_one->img_label    = img_label;
+            train_one->corp_pos     = strider*s_thread_num + z;
+            trainset_lst.push_back(train_one);
+
+            pthread_create(&pthread_id, &pattr, Thread_ComputeHogs, (void*)train_one);
+        }
+        pthread_mutex_lock(&s_main_lock);
+        pthread_cond_wait(&s_hogs_thread_cond, &s_main_lock);
+        pthread_mutex_unlock(&s_main_lock);
+        s_hogs_done = 0;
+
+        for(uint32_t i=0; i<trainset_lst.size(); i++)
+        {
+            TrainSet_t* train_one = trainset_lst[i];
+            free(train_one);
+        }
+        trainset_lst.clear();
+
+        strider++;
+        remain_size -= s_signal_num;
     }
+
+    pthread_attr_destroy(&pattr);
 }
 
+///////////////////////////////////////////////////////////////////////
+/////////////////////////////detection/////////////////////////////////
+///////////////////////////////////////////////////////////////////////
 static void get_CorpImage(matrix<rgb_pixel> image, Size win_size)
 {
     int                 windows_n_rows  = win_size.height;
@@ -139,7 +251,7 @@ static void get_CorpImage(matrix<rgb_pixel> image, Size win_size)
     }
 }
 
-static void Image_Process(uint32_t corp_pos, CorpImage_t& corp_image)
+static void CorpData_Process(uint32_t corp_pos, CorpImage_t& corp_image)
 {
     pthread_mutex_lock(&s_img_lock);
 
@@ -164,7 +276,7 @@ static void CorpDone_Process()
     s_corp_done++;
 
     if(s_corp_done >= s_signal_num)
-        pthread_cond_signal(&s_thread_cond);
+        pthread_cond_signal(&s_corp_thread_cond);
 
     pthread_mutex_unlock(&s_corp_lock);
 }
@@ -179,9 +291,10 @@ static void* Thread_CorpDetect(void* arg)
     dlib::array<dlib::array2d<float>>   planar_hog;
     cv::Mat                             predictMat(1, pcasvm->nEigens, CV_32FC1);
 
-	//corp_data = s_corpdata_lst[*(uint32_t*)arg];  //slower because system do lock
-    Image_Process(pcasvm->corp_pos, corp_data);    //faster because user do lock
-    //cout << "s3: " << arg << endl;
+    //cout << "s2: " << arg << endl;
+
+    //corp_data = s_corpdata_lst[*(uint32_t*)arg];  //slower because system do lock
+    CorpData_Process(pcasvm->corp_pos, corp_data);    //faster because user do lock
     extract_fhog_features(corp_data.img_rgb, planar_hog);
 
     feature_times   = 0;
@@ -253,7 +366,7 @@ static void detect_object(matrix<rgb_pixel> image, cv::PCA* pca, Ptr<SVM>* svm, 
         for(uint32_t z=0; z<s_signal_num; z++)
         {
             PcaSvm_t* pcasvm    = (PcaSvm_t*)malloc(sizeof(PcaSvm_t));
-            //cout << "s1 " << corp_pos << endl;
+            //cout << "s3 " << corp_pos << endl;
             pcasvm->corp_pos    = strider*s_thread_num + z;
             pcasvm->pca         = pca;
             pcasvm->svm         = svm;
@@ -264,7 +377,7 @@ static void detect_object(matrix<rgb_pixel> image, cv::PCA* pca, Ptr<SVM>* svm, 
             pthread_create(&pthread_id, &pattr, Thread_CorpDetect, (void*)pcasvm);
         }
         pthread_mutex_lock(&s_main_lock);
-        pthread_cond_wait(&s_thread_cond, &s_main_lock);
+        pthread_cond_wait(&s_corp_thread_cond, &s_main_lock);
         pthread_mutex_unlock(&s_main_lock);
         s_corp_done = 0;
 
@@ -323,42 +436,46 @@ int main(int argc, char** argv)
     int                             negative_count;
     std::vector<int>                labels;
     std::vector<matrix<rgb_pixel>>  pos_lst, neg_lst, test_lst;
-    std::vector<cv::Mat>            train_gradients;
+    //std::vector<cv::Mat>          s_trainfhogs_lst;
     Size                            win_size = Size(128, 256);
 
     pthread_mutex_init(&s_main_lock,NULL);
+    pthread_mutex_init(&s_train_lock,NULL);
+    pthread_mutex_init(&s_planar_lock,NULL);
+    pthread_mutex_init(&s_hogs_lock,NULL);
     pthread_mutex_init(&s_img_lock, NULL);
     pthread_mutex_init(&s_rect_lock,NULL);
     pthread_mutex_init(&s_corp_lock,NULL);
-    pthread_cond_init(&s_thread_cond,NULL);
+    pthread_cond_init(&s_hogs_thread_cond,NULL);
+    pthread_cond_init(&s_corp_thread_cond,NULL);
 
-    load_images("./pos", pos_lst, win_size);
-    compute_HOGs( pos_lst, train_gradients, win_size, false );
-    positive_count = train_gradients.size();
+    load_images("./pos", s_pos_lst, win_size);
+    compute_HOGs( 1, s_pos_lst, win_size );
+    positive_count = s_trainfhogs_lst.size();
     labels.assign( positive_count, +1 );
 
-    load_images("./neg", neg_lst, win_size);
-    compute_HOGs( neg_lst, train_gradients, win_size, false );
-    negative_count = train_gradients.size() - positive_count;
+    load_images("./neg", s_neg_lst, win_size);
+    compute_HOGs(-1, s_neg_lst, win_size );
+    negative_count = s_trainfhogs_lst.size() - positive_count;
     labels.insert(labels.end(), negative_count, -1);
 
     //Load the train_images into a Matrix
-    //cv::Mat desc_mat(train_gradients.size(), train_gradients[0].rows * train_gradients[0].cols, CV_8UC1); //pca only
-    cv::Mat desc_mat(train_gradients.size(), train_gradients[0].rows * train_gradients[0].cols, CV_32FC1);
-    for (uint32_t i=0; i<train_gradients.size(); i++)
+    //cv::Mat desc_mat(s_trainfhogs_lst.size(), s_trainfhogs_lst[0].rows * s_trainfhogs_lst[0].cols, CV_8UC1); //pca only
+    cv::Mat desc_mat(s_trainfhogs_lst.size(), s_trainfhogs_lst[0].rows * s_trainfhogs_lst[0].cols, CV_32FC1);
+    for (uint32_t i=0; i<s_trainfhogs_lst.size(); i++)
     {
         //desc_mat.row(i) = train_images[i].reshape(1, 1) + 0;
-        //train_gradients[i].copyTo(desc_mat.row(i));
-        train_gradients[i].reshape(1, 1).copyTo(desc_mat.row(i)); //reshaped in compute_HOGs
+        //s_trainfhogs_lst[i].copyTo(desc_mat.row(i));
+        s_trainfhogs_lst[i].reshape(1, 1).copyTo(desc_mat.row(i)); //reshaped in compute_HOGs
     }
 
     printf("pca trained start\n");
-    int nEigens     = train_gradients[0].rows * train_gradients[0].cols / 4; //downsample related u+=4
+    int nEigens     = s_trainfhogs_lst[0].rows * s_trainfhogs_lst[0].cols / 4; //downsample related u+=4
     cv::Mat average = cv::Mat();
     PCA pca_trainer(desc_mat, average, CV_PCA_DATA_AS_ROW, nEigens);
     cv::Mat data(desc_mat.rows, nEigens, CV_32FC1);
     //Project the train_images onto the PCA subspace
-    for(uint32_t i=0; i<train_gradients.size(); i++)
+    for(uint32_t i=0; i<s_trainfhogs_lst.size(); i++)
     {
         cv::Mat projectedMat(1, nEigens, CV_32FC1);
         pca_trainer.project(desc_mat.row(i), projectedMat);
@@ -403,11 +520,20 @@ int main(int argc, char** argv)
     fps 	= frames / elapsed;
     printf("detected frames=%lu\nelapsed time=%f\nfps=%f\n", frames, elapsed, fps);
 
-    pthread_cond_destroy(&s_thread_cond);
+    pthread_cond_destroy(&s_corp_thread_cond);
+    pthread_cond_destroy(&s_hogs_thread_cond);
     pthread_mutex_destroy(&s_corp_lock);
     pthread_mutex_destroy(&s_rect_lock);
     pthread_mutex_destroy(&s_img_lock);
+    pthread_mutex_destroy(&s_hogs_lock);
+    pthread_mutex_destroy(&s_planar_lock);
+    pthread_mutex_destroy(&s_train_lock);
     pthread_mutex_destroy(&s_main_lock);
+
+    s_pos_lst.clear();
+    s_neg_lst.clear();
+    s_trainfhogs_lst.clear();
+    s_corpdata_lst.clear();
 
     return EXIT_SUCCESS;
 }
