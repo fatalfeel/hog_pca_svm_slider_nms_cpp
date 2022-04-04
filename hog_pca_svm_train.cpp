@@ -323,7 +323,7 @@ int main(int argc, char** argv)
     int                             negative_count;
     std::vector<int>                labels;
     std::vector<matrix<rgb_pixel>>  pos_lst, neg_lst, test_lst;
-    std::vector<cv::Mat>            train_gradients, test_gradients;
+    std::vector<cv::Mat>            train_gradients;
     Size                            win_size = Size(128, 256);
 
     pthread_mutex_init(&s_main_lock,NULL);
