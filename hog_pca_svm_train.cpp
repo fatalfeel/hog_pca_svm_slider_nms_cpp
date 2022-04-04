@@ -202,10 +202,10 @@ static void* Thread_CorpDetect(void* arg)
     //cout << "s3: " << arg << endl;
     extract_fhog_features(corp_data.img_rgb, planar_hog);
 
-	feature_times   = 0;
-	predict_socre   = 0.0f;
-	for(uint32_t u=0; u<planar_hog.size(); u+=4) //we don't need all size() 31 features so k+=4
-	{
+    feature_times   = 0;
+    predict_socre   = 0.0f;
+    for(uint32_t u=0; u<planar_hog.size(); u+=4) //we don't need all size() 31 features so k+=4
+    {
         cv::Mat cMat= toMat(planar_hog[u]);
         cv::Mat dst = cMat.reshape(1, 1);
 
@@ -217,7 +217,7 @@ static void* Thread_CorpDetect(void* arg)
         }
 
         feature_times++;
-	}
+    }
 
     if ( predict_socre / (float)feature_times >= pcasvm->thres_hold )
     {
@@ -406,31 +406,31 @@ int main(int argc, char** argv)
     printf("test start\n");
     load_images("./test", test_lst, win_size, false);
     uint64_t		frames = 0;
-	double 			elapsed,fps;
-	struct timespec t1, t2;
-	clock_gettime(CLOCK_REALTIME, &t1);
+    double 			elapsed,fps;
+    struct timespec t1, t2;
+    clock_gettime(CLOCK_REALTIME, &t1);
 
-	//for (int k=0; k<100; k++) //for test fps
-	{
-		for(auto& img : test_lst)
+    //for (int k=0; k<100; k++) //for test fps
+    {
+        for(auto& img : test_lst)
         {
             detect_object(img, &pca_trainer, &svm, nEigens, win_size);
             frames++;
         }
-	}
+    }
 
     clock_gettime(CLOCK_REALTIME, &t2);
-	elapsed = ((t2.tv_sec - t1.tv_sec) * 1000000000 + t2.tv_nsec - t1.tv_nsec) / 1000000000.0;
-	fps 	= frames / elapsed;
-	printf("detected frames=%lu\nelapsed time=%f\nfps=%f\n", frames, elapsed, fps);
+    elapsed = ((t2.tv_sec - t1.tv_sec) * 1000000000 + t2.tv_nsec - t1.tv_nsec) / 1000000000.0;
+    fps 	= frames / elapsed;
+    printf("detected frames=%lu\nelapsed time=%f\nfps=%f\n", frames, elapsed, fps);
 
-	pthread_cond_destroy(&s_thread_cond);
-	pthread_mutex_destroy(&s_rect_lock);
-	pthread_mutex_destroy(&s_hog_lock);
-	pthread_mutex_destroy(&s_img_lock);
-	pthread_mutex_destroy(&s_main_lock);
+    pthread_cond_destroy(&s_thread_cond);
+    pthread_mutex_destroy(&s_rect_lock);
+    pthread_mutex_destroy(&s_hog_lock);
+    pthread_mutex_destroy(&s_img_lock);
+    pthread_mutex_destroy(&s_main_lock);
 
-	return EXIT_SUCCESS;
+    return EXIT_SUCCESS;
 }
 
 // ----------------------------------------------------------------------------------------
