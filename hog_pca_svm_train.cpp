@@ -118,17 +118,6 @@ static void compute_HOGs( std::vector<matrix<rgb_pixel>>& img_lst, std::vector<c
     }
 }
 
-static void get_OneHOG(matrix<rgb_pixel>& img, std::vector<cv::Mat>& gradient_lst)
-{
-	dlib::array<dlib::array2d<float>> planar_hog;
-	extract_fhog_features(img, planar_hog);
-	for(uint32_t u=0; u<planar_hog.size(); u+=4) //we don't need all size() 31 features so k+=4
-	{
-		cv::Mat cMat = toMat(planar_hog[u]);
-		gradient_lst.push_back(cMat.clone());
-	}
-}
-
 static void get_CorpImage(matrix<rgb_pixel> image, Size win_size)
 {
     int                 windows_n_rows  = win_size.height;
