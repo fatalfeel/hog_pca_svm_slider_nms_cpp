@@ -336,8 +336,8 @@ int main(int argc, char** argv)
     std::vector<cv::Mat>            train_gradients, test_gradients;
     Size                            win_size = Size(128, 256);
 
-	pthread_mutex_init(&s_main_lock,NULL);
-	pthread_mutex_init(&s_img_lock, NULL);
+    pthread_mutex_init(&s_main_lock,NULL);
+    pthread_mutex_init(&s_img_lock, NULL);
     pthread_mutex_init(&s_rect_lock,NULL);
     pthread_mutex_init(&s_corp_lock,NULL);
     pthread_cond_init(&s_thread_cond,NULL);
