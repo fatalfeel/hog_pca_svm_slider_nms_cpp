@@ -198,15 +198,15 @@ static void* Thread_CorpDetect(void* arg)
     cv::Mat                             predictMat(1, pcasvm->nEigens, CV_32FC1);
 
 	//corp_data = s_corpdata_lst[*(uint32_t*)arg];  //slower because system do lock
-	Image_Process(*pcasvm->corp_pos, corp_data);      //faster because user do lock
-	//cout << "s3 " << arg << endl;
-	extract_fhog_features(corp_data.img_rgb, planar_hog);
+    Image_Process(*pcasvm->corp_pos, corp_data);    //faster because user do lock
+    //cout << "s3: " << arg << endl;
+    extract_fhog_features(corp_data.img_rgb, planar_hog);
 
 	feature_times   = 0;
 	predict_socre   = 0.0f;
 	for(uint32_t u=0; u<planar_hog.size(); u+=4) //we don't need all size() 31 features so k+=4
 	{
-		cv::Mat cMat= toMat(planar_hog[u]);
+        cv::Mat cMat= toMat(planar_hog[u]);
         cv::Mat dst = cMat.reshape(1, 1);
 
         (*pcasvm->pca).project(dst, predictMat);
@@ -219,7 +219,7 @@ static void* Thread_CorpDetect(void* arg)
         feature_times++;
 	}
 
-	if ( predict_socre / (float)feature_times >= pcasvm->thres_hold )
+    if ( predict_socre / (float)feature_times >= pcasvm->thres_hold )
     {
         //cout << onehog.drect.left() << "," << onehog.drect.top() << "," << onehog.drect.right() << "," << onehog.drect.bottom() << endl;
         p0 = cv::Point(corp_data.drect.left(),   corp_data.drect.top());
@@ -228,10 +228,10 @@ static void* Thread_CorpDetect(void* arg)
         Rect_Process(p0, p1);
     }
 
-	//if ( predict_socre > 1.0f ) //test for score
-	//    cout << corp_data.drect.left() << "," << corp_data.drect.top() << "," << corp_data.drect.right() << "," << corp_data.drect.bottom() << ": " << predict_socre << endl;
+    //if ( predict_socre > 1.0f ) //test for score
+    //    cout << corp_data.drect.left() << "," << corp_data.drect.top() << "," << corp_data.drect.right() << "," << corp_data.drect.bottom() << ": " << predict_socre << endl;
 
-	CorpDone_Process();
+    CorpDone_Process();
 
     return NULL;
 }
