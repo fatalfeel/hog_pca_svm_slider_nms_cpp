@@ -171,16 +171,6 @@ static void* Thread_ComputeHog(void* arg)
 
 static void compute_HOGs( int img_label, std::vector<matrix<rgb_pixel>>& img_lst, Size win_size )
 {
-    /*for( size_t i = 0 ; i < img_lst.size(); i++ )
-    {
-        dlib::array<dlib::array2d<float>> planar_hog;
-        extract_fhog_features(img_lst[i], planar_hog);
-        for(uint32_t u=0; u<planar_hog.size(); u+=4) //we don't need all size() 31 features so k+=4
-        {
-            cv::Mat cMat = toMat(planar_hog[u]);
-            gradient_lst.push_back(cMat.clone());
-        }
-    }*/
     pthread_attr_t  pattr;
     pthread_t       pthread_id;
 
