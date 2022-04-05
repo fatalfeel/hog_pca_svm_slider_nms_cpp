@@ -50,18 +50,19 @@ std::vector<matrix<rgb_pixel>>  s_pos_lst;
 std::vector<matrix<rgb_pixel>>  s_neg_lst;
 std::vector<cv::Mat>            s_trainfhogs_lst;
 std::vector<CorpImage_t>        s_corpdata_lst;
+std::vector<cv::Rect>           s_srcRects;
 pthread_mutex_t                 s_main_lock;
 ////////////////////////////////////////////////////
 pthread_mutex_t                 s_train_lock;
 pthread_mutex_t                 s_planar_lock;
-pthread_mutex_t                 s_hogs_lock;
+pthread_mutex_t                 s_hogdone_lock;
 ////////////////////////////////////////////////////
 pthread_mutex_t                 s_img_lock;
 pthread_mutex_t                 s_rect_lock;
-pthread_mutex_t                 s_corp_lock;
+pthread_mutex_t                 s_detectdone_lock;
+////////////////////////////////////////////////////
 pthread_cond_t                  s_hogs_thread_cond;
 pthread_cond_t                  s_corp_thread_cond;
-std::vector<cv::Rect>           s_srcRects;
 
 static void load_images( const String& dirname, std::vector<matrix<rgb_pixel>>& img_lst, Size img_size, bool isTrain = true)
 {
@@ -133,17 +134,17 @@ static void Planar_Process(cv::Mat cMat)
 
 static void HogDone_Process()
 {
-    pthread_mutex_lock(&s_hogs_lock);
+    pthread_mutex_lock(&s_hogdone_lock);
 
     s_hogs_done++;
 
     if(s_hogs_done >= s_signal_num)
         pthread_cond_signal(&s_hogs_thread_cond);
 
-    pthread_mutex_unlock(&s_hogs_lock);
+    pthread_mutex_unlock(&s_hogdone_lock);
 }
 
-static void* Thread_ComputeHogs(void* arg)
+static void* Thread_ComputeHog(void* arg)
 {
     TrainSet_t*                         train_one = (TrainSet_t*)arg;
     matrix<rgb_pixel>                   img_rgb;
@@ -200,7 +201,7 @@ static void compute_HOGs( int img_label, std::vector<matrix<rgb_pixel>>& img_lst
             train_one->corp_pos     = strider*s_thread_num + z;
             trainset_lst.push_back(train_one);
 
-            pthread_create(&pthread_id, &pattr, Thread_ComputeHogs, (void*)train_one);
+            pthread_create(&pthread_id, &pattr, Thread_ComputeHog, (void*)train_one);
         }
         pthread_mutex_lock(&s_main_lock);
         pthread_cond_wait(&s_hogs_thread_cond, &s_main_lock);
@@ -269,16 +270,16 @@ static void Rect_Process(cv::Point p0, cv::Point p1)
     pthread_mutex_unlock(&s_rect_lock);
 }
 
-static void CorpDone_Process()
+static void DetectDone_Process()
 {
-    pthread_mutex_lock(&s_corp_lock);
+    pthread_mutex_lock(&s_detectdone_lock);
 
     s_corp_done++;
 
     if(s_corp_done >= s_signal_num)
         pthread_cond_signal(&s_corp_thread_cond);
 
-    pthread_mutex_unlock(&s_corp_lock);
+    pthread_mutex_unlock(&s_detectdone_lock);
 }
 
 static void* Thread_CorpDetect(void* arg)
@@ -326,7 +327,7 @@ static void* Thread_CorpDetect(void* arg)
     //if ( predict_socre > 1.0f ) //test for score
     //    cout << corp_data.drect.left() << "," << corp_data.drect.top() << "," << corp_data.drect.right() << "," << corp_data.drect.bottom() << ": " << predict_socre << endl;
 
-    CorpDone_Process();
+    DetectDone_Process();
 
     return NULL;
 }
@@ -440,16 +441,20 @@ int main(int argc, char** argv)
     Size                            win_size = Size(128, 256);
 
     pthread_mutex_init(&s_main_lock,NULL);
+    ////////////////////////////////////////////////////
     pthread_mutex_init(&s_train_lock,NULL);
     pthread_mutex_init(&s_planar_lock,NULL);
-    pthread_mutex_init(&s_hogs_lock,NULL);
+    pthread_mutex_init(&s_hogdone_lock,NULL);
+    ////////////////////////////////////////////////////
     pthread_mutex_init(&s_img_lock, NULL);
     pthread_mutex_init(&s_rect_lock,NULL);
-    pthread_mutex_init(&s_corp_lock,NULL);
+    pthread_mutex_init(&s_detectdone_lock,NULL);
+    ////////////////////////////////////////////////////
     pthread_cond_init(&s_hogs_thread_cond,NULL);
     pthread_cond_init(&s_corp_thread_cond,NULL);
 
 ////////////////////////hog////////////////////////
+    cout << "hog calculate start" << endl;
     load_images("./pos", s_pos_lst, win_size);
     compute_HOGs( 1, s_pos_lst, win_size );
     positive_count = s_trainfhogs_lst.size();
@@ -471,7 +476,7 @@ int main(int argc, char** argv)
     }
 
 ////////////////////////pca////////////////////////
-    printf("pca trained start\n");
+    cout << "pca trained start" << endl;
     int nEigens     = s_trainfhogs_lst[0].rows * s_trainfhogs_lst[0].cols / 4; //downsample related u+=4
     cv::Mat average = cv::Mat();
     PCA pca_trainer(desc_mat, average, CV_PCA_DATA_AS_ROW, nEigens);
@@ -492,13 +497,13 @@ int main(int argc, char** argv)
     s_trainfhogs_lst.clear();
 
 ////////////////////////svm////////////////////////
-    printf("svm trained start\n");
+    cout << "svm trained start" << endl;
     Ptr<SVM> svm = SVM::create();
     svm->setType(SVM::C_SVC);
     svm->setKernel( SVM::RBF );
-    svm->setGamma(0.55); //lower more boxes
+    svm->setGamma(0.55);    //lower more boxes
     //svm->setCoef0(1.0);
-    svm->setC(1.5);     //lower more boxes
+    svm->setC(1.5);         //lower more boxes
     //svm->setNu(0.5);
     //svm->setP(1.0);
     svm->setTermCriteria( TermCriteria( CV_TERMCRIT_ITER+CV_TERMCRIT_EPS, 1000000, FLT_EPSILON ));
@@ -506,7 +511,8 @@ int main(int argc, char** argv)
     //svm->save("svm_data.xml");
     //svm->load("svm_data.xml");
 
-    printf("test start\n");
+//////////////////////detect test/////////////////////
+    cout << "detect test start" << endl;
     load_images("./test", test_lst, win_size, false);
     uint64_t		frames = 0;
     double 			elapsed,fps;
@@ -527,17 +533,22 @@ int main(int argc, char** argv)
     fps 	= frames / elapsed;
     printf("detected frames=%lu\nelapsed time=%f\nfps=%f\n", frames, elapsed, fps);
 
+//////////////////////destory/////////////////////
     pthread_cond_destroy(&s_corp_thread_cond);
     pthread_cond_destroy(&s_hogs_thread_cond);
-    pthread_mutex_destroy(&s_corp_lock);
+    ////////////////////////////////////////////////////
+    pthread_mutex_destroy(&s_detectdone_lock);
     pthread_mutex_destroy(&s_rect_lock);
     pthread_mutex_destroy(&s_img_lock);
-    pthread_mutex_destroy(&s_hogs_lock);
+    ////////////////////////////////////////////////////
+    pthread_mutex_destroy(&s_hogdone_lock);
     pthread_mutex_destroy(&s_planar_lock);
     pthread_mutex_destroy(&s_train_lock);
+    ////////////////////////////////////////////////////
     pthread_mutex_destroy(&s_main_lock);
 
-    s_corpdata_lst.clear();
+    //s_corpdata_lst.clear();   //in func detect_object
+    //s_srcRects.clear();       //in func detect_object
 
     return EXIT_SUCCESS;
 }
