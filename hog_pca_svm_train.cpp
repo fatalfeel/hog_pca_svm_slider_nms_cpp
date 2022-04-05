@@ -61,7 +61,7 @@ pthread_mutex_t                 s_img_lock;
 pthread_mutex_t                 s_rect_lock;
 pthread_mutex_t                 s_detectdone_lock;
 ////////////////////////////////////////////////////
-pthread_cond_t                  s_hogs_thread_cond;
+pthread_cond_t                  s_hog_thread_cond;
 pthread_cond_t                  s_corp_thread_cond;
 
 static void load_images( const String& dirname, std::vector<matrix<rgb_pixel>>& img_lst, Size img_size, bool isTrain = true)
@@ -142,7 +142,7 @@ static void HogDone_Process()
     s_hog_done++;
 
     if(s_hog_done >= s_signal_num)
-        pthread_cond_signal(&s_hogs_thread_cond);
+        pthread_cond_signal(&s_hog_thread_cond);
 
     pthread_mutex_unlock(&s_hogdone_lock);
 }
@@ -197,7 +197,7 @@ static void compute_HOGs( int img_label, std::vector<matrix<rgb_pixel>>& img_lst
             pthread_create(&pthread_id, &pattr, Thread_ComputeHog, (void*)train_one);
         }
         pthread_mutex_lock(&s_main_lock);
-        pthread_cond_wait(&s_hogs_thread_cond, &s_main_lock);
+        pthread_cond_wait(&s_hog_thread_cond, &s_main_lock);
         pthread_mutex_unlock(&s_main_lock);
         s_hog_done = 0;
 
@@ -445,7 +445,7 @@ int main(int argc, char** argv)
     pthread_mutex_init(&s_rect_lock,NULL);
     pthread_mutex_init(&s_detectdone_lock,NULL);
     ////////////////////////////////////////////////////
-    pthread_cond_init(&s_hogs_thread_cond,NULL);
+    pthread_cond_init(&s_hog_thread_cond,NULL);
     pthread_cond_init(&s_corp_thread_cond,NULL);
 
 ////////////////////////hog////////////////////////
@@ -530,7 +530,7 @@ int main(int argc, char** argv)
 
 //////////////////////destory/////////////////////
     pthread_cond_destroy(&s_corp_thread_cond);
-    pthread_cond_destroy(&s_hogs_thread_cond);
+    pthread_cond_destroy(&s_hog_thread_cond);
     ////////////////////////////////////////////////////
     pthread_mutex_destroy(&s_detectdone_lock);
     pthread_mutex_destroy(&s_rect_lock);
