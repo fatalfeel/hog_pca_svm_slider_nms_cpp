@@ -436,7 +436,7 @@ int main(int argc, char** argv)
     int                             negative_count;
     std::vector<int>                labels;
     std::vector<matrix<rgb_pixel>>  pos_lst, neg_lst, test_lst;
-    //std::vector<cv::Mat>          s_trainfhogs_lst;
+    //std::vector<cv::Mat>          trainfhogs_lst;
     Size                            win_size = Size(128, 256);
 
     pthread_mutex_init(&s_main_lock,NULL);
@@ -449,6 +449,7 @@ int main(int argc, char** argv)
     pthread_cond_init(&s_hogs_thread_cond,NULL);
     pthread_cond_init(&s_corp_thread_cond,NULL);
 
+////////////////////////hog////////////////////////
     load_images("./pos", s_pos_lst, win_size);
     compute_HOGs( 1, s_pos_lst, win_size );
     positive_count = s_trainfhogs_lst.size();
@@ -469,6 +470,7 @@ int main(int argc, char** argv)
         s_trainfhogs_lst[i].reshape(1, 1).copyTo(desc_mat.row(i)); //reshaped in compute_HOGs
     }
 
+////////////////////////pca////////////////////////
     printf("pca trained start\n");
     int nEigens     = s_trainfhogs_lst[0].rows * s_trainfhogs_lst[0].cols / 4; //downsample related u+=4
     cv::Mat average = cv::Mat();
@@ -485,6 +487,11 @@ int main(int argc, char** argv)
     }
     //pca_save("pca_data.xml",pca_trainer);
 
+    s_pos_lst.clear();
+    s_neg_lst.clear();
+    s_trainfhogs_lst.clear();
+
+////////////////////////svm////////////////////////
     printf("svm trained start\n");
     Ptr<SVM> svm = SVM::create();
     svm->setType(SVM::C_SVC);
@@ -530,9 +537,6 @@ int main(int argc, char** argv)
     pthread_mutex_destroy(&s_train_lock);
     pthread_mutex_destroy(&s_main_lock);
 
-    s_pos_lst.clear();
-    s_neg_lst.clear();
-    s_trainfhogs_lst.clear();
     s_corpdata_lst.clear();
 
     return EXIT_SUCCESS;
