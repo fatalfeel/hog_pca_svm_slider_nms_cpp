@@ -328,8 +328,7 @@ static void* Thread_CorpDetect(void* arg)
     return NULL;
 }
 
-//static void detect_object(matrix<rgb_pixel>& image, cv::PCA& pca, Ptr<SVM>& svm, int nEigens, Size win_size, float thres_hold = 0.01f)
-static void detect_object(matrix<rgb_pixel> image, cv::PCA* pca, Ptr<SVM>* svm, int nEigens, Size win_size, float thres_hold = 0.2f)
+static void detect_object(matrix<rgb_pixel> image, cv::PCA* pca, Ptr<SVM>* svm, int nEigens, Size win_size, float thres_hold = 0.4f)
 {
     int                     feature_times;
     //float                	predict_socre;
@@ -496,12 +495,12 @@ int main(int argc, char** argv)
     Ptr<SVM> svm = SVM::create();
     svm->setType(SVM::C_SVC);
     svm->setKernel( SVM::RBF );
-    svm->setGamma(0.55);    //lower more boxes
+    svm->setGamma(0.5);     //lower more boxes
     //svm->setCoef0(1.0);
     svm->setC(1.5);         //lower more boxes
     //svm->setNu(0.5);
     //svm->setP(1.0);
-    svm->setTermCriteria( TermCriteria( CV_TERMCRIT_ITER+CV_TERMCRIT_EPS, 1000000, FLT_EPSILON ));
+    svm->setTermCriteria( TermCriteria( CV_TERMCRIT_ITER+CV_TERMCRIT_EPS, 80000000, FLT_EPSILON ));
     svm->train( data, ROW_SAMPLE, labels );
     //svm->save("svm_data.xml");
     //svm->load("svm_data.xml");
