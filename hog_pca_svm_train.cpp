@@ -23,8 +23,8 @@ using namespace dlib;
 
 typedef struct _TrainSet_t
 {
+    uint32  img_id;
     uint32  img_label;
-    uint32  corp_pos;
 }TrainSet_t;
 
 typedef struct _CorpImage_t
@@ -35,7 +35,7 @@ typedef struct _CorpImage_t
 
 typedef struct _PcaSvm_t
 {
-    uint32      corp_pos;
+    uint32      corp_id;
     int         nEigens;
     float       thres_hold;
     cv::PCA*    pca;
@@ -44,8 +44,8 @@ typedef struct _PcaSvm_t
 
 static int                      s_thread_num    = 128;
 static volatile int             s_signal_num    = 128; //must use volatile avoid release lock in cache
-static volatile int             s_hogs_done     = 0;
-static volatile int             s_corp_done     = 0;
+static volatile int             s_hog_done      = 0;
+static volatile int             s_detect_done   = 0;
 std::vector<matrix<rgb_pixel>>  s_pos_lst;
 std::vector<matrix<rgb_pixel>>  s_neg_lst;
 std::vector<cv::Mat>            s_trainfhogs_lst;
@@ -106,17 +106,17 @@ static void load_images( const String& dirname, std::vector<matrix<rgb_pixel>>& 
 ///////////////////////////////////////////////////////////////////////
 /////////////////////////////////Train/////////////////////////////////
 ///////////////////////////////////////////////////////////////////////
-static void TrainData_Process(int img_label, uint32_t corp_pos, matrix<rgb_pixel>& img_rgb)
+static void TrainData_Process(uint32_t img_id, int img_label, matrix<rgb_pixel>& img_rgb)
 {
     pthread_mutex_lock(&s_train_lock);
 
     switch(img_label)
     {
         case  1:
-            img_rgb = s_pos_lst[corp_pos];
+            img_rgb = s_pos_lst[img_id];
             break;
         case -1:
-            img_rgb = s_neg_lst[corp_pos];
+            img_rgb = s_neg_lst[img_id];
             break;
     }
 
@@ -132,13 +132,16 @@ static void Planar_Process(cv::Mat cMat)
     pthread_mutex_unlock(&s_planar_lock);
 }
 
+//static void HogDone_Process(uint32_t test_value)
 static void HogDone_Process()
 {
     pthread_mutex_lock(&s_hogdone_lock);
 
-    s_hogs_done++;
+    //cout << "HogDone_Process: " << test_value << endl;
 
-    if(s_hogs_done >= s_signal_num)
+    s_hog_done++;
+
+    if(s_hog_done >= s_signal_num)
         pthread_cond_signal(&s_hogs_thread_cond);
 
     pthread_mutex_unlock(&s_hogdone_lock);
@@ -150,9 +153,9 @@ static void* Thread_ComputeHog(void* arg)
     matrix<rgb_pixel>                   img_rgb;
     dlib::array<dlib::array2d<float>>   planar_hog;
 
-    //cout << "s1: " << train_one->corp_pos << endl; //debug
+    //cout << "s1: " << train_one->corp_id << endl; //debug
 
-    TrainData_Process(train_one->img_label, train_one->corp_pos, img_rgb);
+    TrainData_Process(train_one->img_id, train_one->img_label, img_rgb);
     extract_fhog_features(img_rgb, planar_hog);
 
     for(uint32_t u=0; u<planar_hog.size(); u+=4) //we don't need all size() 31 features so k+=4
@@ -197,8 +200,8 @@ static void compute_HOGs( int img_label, std::vector<matrix<rgb_pixel>>& img_lst
         for(uint32_t z=0; z<s_signal_num; z++)
         {
             TrainSet_t* train_one   = (TrainSet_t*)malloc(sizeof(TrainSet_t));
+            train_one->img_id       = strider*s_thread_num + z;
             train_one->img_label    = img_label;
-            train_one->corp_pos     = strider*s_thread_num + z;
             trainset_lst.push_back(train_one);
 
             pthread_create(&pthread_id, &pattr, Thread_ComputeHog, (void*)train_one);
@@ -206,7 +209,7 @@ static void compute_HOGs( int img_label, std::vector<matrix<rgb_pixel>>& img_lst
         pthread_mutex_lock(&s_main_lock);
         pthread_cond_wait(&s_hogs_thread_cond, &s_main_lock);
         pthread_mutex_unlock(&s_main_lock);
-        s_hogs_done = 0;
+        s_hog_done = 0;
 
         for(uint32_t i=0; i<trainset_lst.size(); i++)
         {
@@ -252,11 +255,11 @@ static void get_CorpImage(matrix<rgb_pixel> image, Size win_size)
     }
 }
 
-static void CorpData_Process(uint32_t corp_pos, CorpImage_t& corp_image)
+static void CorpData_Process(uint32_t corp_id, CorpImage_t& corp_image)
 {
     pthread_mutex_lock(&s_img_lock);
 
-    corp_image = s_corpdata_lst[corp_pos];
+    corp_image = s_corpdata_lst[corp_id];
 
     pthread_mutex_unlock(&s_img_lock);
 }
@@ -270,13 +273,16 @@ static void Rect_Process(cv::Point p0, cv::Point p1)
     pthread_mutex_unlock(&s_rect_lock);
 }
 
+//static void DetectDone_Process(uint32_t test_value)
 static void DetectDone_Process()
 {
     pthread_mutex_lock(&s_detectdone_lock);
 
-    s_corp_done++;
+    //cout << "DetectDone_Process: " << test_value << endl;
 
-    if(s_corp_done >= s_signal_num)
+    s_detect_done++;
+
+    if(s_detect_done >= s_signal_num)
         pthread_cond_signal(&s_corp_thread_cond);
 
     pthread_mutex_unlock(&s_detectdone_lock);
@@ -295,7 +301,7 @@ static void* Thread_CorpDetect(void* arg)
     //cout << "s2: " << arg << endl;
 
     //corp_data = s_corpdata_lst[*(uint32_t*)arg];  //slower because system do lock
-    CorpData_Process(pcasvm->corp_pos, corp_data);    //faster because user do lock
+    CorpData_Process(pcasvm->corp_id, corp_data);    //faster because user do lock
     extract_fhog_features(corp_data.img_rgb, planar_hog);
 
     feature_times   = 0;
@@ -362,13 +368,12 @@ static void detect_object(matrix<rgb_pixel> image, cv::PCA* pca, Ptr<SVM>* svm, 
 
     	/*must malloc memory pointer to pthread_create,
     	 *using one address send to pthread_create,
-    	 *some of Thread_CorpDetect will get same corp_pos*/
+    	 *some of Thread_CorpDetect will get same corp_id*/
     	std::vector<PcaSvm_t*> pca_svm_lst;
         for(uint32_t z=0; z<s_signal_num; z++)
         {
             PcaSvm_t* pcasvm    = (PcaSvm_t*)malloc(sizeof(PcaSvm_t));
-            //cout << "s3 " << corp_pos << endl;
-            pcasvm->corp_pos    = strider*s_thread_num + z;
+            pcasvm->corp_id     = strider*s_thread_num + z;
             pcasvm->pca         = pca;
             pcasvm->svm         = svm;
             pcasvm->nEigens     = nEigens;
@@ -380,7 +385,7 @@ static void detect_object(matrix<rgb_pixel> image, cv::PCA* pca, Ptr<SVM>* svm, 
         pthread_mutex_lock(&s_main_lock);
         pthread_cond_wait(&s_corp_thread_cond, &s_main_lock);
         pthread_mutex_unlock(&s_main_lock);
-        s_corp_done = 0;
+        s_detect_done = 0;
 
         for(uint32_t i=0; i<pca_svm_lst.size(); i++)
         {
