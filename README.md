@@ -1,6 +1,7 @@
 # Hog Pca Svm Slider Nms C++
 nms refer to : https://github.com/Nuzhny007/Non-Maximum-Suppression  
-code explain: http://fatalfeel.blogspot.com/2022/04/hog-pca-svm-slider-nms-in-c.html
+code explain: http://fatalfeel.blogspot.com/2022/04/hog-pca-svm-slider-nms-in-c.html  
+Guide by Dr. Chen
 # Preinstall
 opencv dlib cpp  
 http://fatalfeel.blogspot.com/2013/12/opencv-and-dlib-training.html
