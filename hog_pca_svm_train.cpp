@@ -147,6 +147,24 @@ static void HogDone_Process()
     pthread_mutex_unlock(&s_hogdone_lock);
 }
 
+/*
+there are 31 features in each cell of fhog
+1.
+array2d<matrix<float,31,1>> hog;
+extract_fhog_features(img_rgb, hog);
+cols = hog.nc(), rows = hog.nr()
+there are cols*rows cells
+there are 31 features in each cell(31FC)
+2.
+dlib::array<array2d<float>> planar_hog;
+extract_fhog_features(img_rgb, planar_hog);
+there are 31 different matrices, u=0~30 
+cols = planar_hog[u].nc(), rows = planar_hog[u].nr()
+there are cols*rows features in each matrix
+there are all first  of 31 features(31FC) in matrix planar_hog[0] 
+there are all second of 31 features(31FC) in matrix planar_hog[1] 
+...
+*/
 static void* Thread_ComputeHog(void* arg)
 {
     TrainSet_t*                 train_one = (TrainSet_t*)arg;
