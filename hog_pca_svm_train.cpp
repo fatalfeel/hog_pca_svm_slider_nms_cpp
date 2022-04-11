@@ -29,8 +29,8 @@ typedef struct _TrainSet_t
 
 typedef struct _CorpImage_t
 {
-	dlib::rectangle		drect;
-	matrix<rgb_pixel>   img_rgb;
+    dlib::rectangle     drect;
+    matrix<rgb_pixel>   img_rgb;
 }CorpImage_t;
 
 typedef struct _PcaSvm_t
@@ -88,18 +88,18 @@ static void load_images( const String& dirname, std::vector<matrix<rgb_pixel>>& 
 
         //hog + pca
         matrix<rgb_pixel> img_rgb;
-    	load_image(img_rgb, files[i]);
+        load_image(img_rgb, files[i]);
 
-    	if( isTrain )
-    	{
+        if( isTrain )
+        {
             if( img_rgb.nc() != img_size.width || img_rgb.nr() != img_size.height )
             {
                 dlib::matrix<float> size_mask(img_size.height,img_size.width);
                 dlib::resize_image(img_rgb, size_mask);
             }
-    	}
+        }
 
-    	img_lst.push_back( img_rgb );
+        img_lst.push_back( img_rgb );
     }
 }
 
@@ -158,23 +158,33 @@ there are 31 features in each cell(31FC)
 2.
 dlib::array<array2d<float>> planar_hog;
 extract_fhog_features(img_rgb, planar_hog);
-there are 31 different matrices, u=0~30 
+there are 31 different matrices, u=0~30
 cols = planar_hog[u].nc(), rows = planar_hog[u].nr()
 there are cols*rows features in each matrix
-there are all first  of 31 features(31FC) in matrix planar_hog[0] 
-there are all second of 31 features(31FC) in matrix planar_hog[1] 
+there are all first  of 31 features(31FC) in matrix planar_hog[0]
+there are all second of 31 features(31FC) in matrix planar_hog[1]
 ...
 */
 static void* Thread_ComputeHog(void* arg)
 {
     TrainSet_t*                 train_one = (TrainSet_t*)arg;
     matrix<rgb_pixel>           img_rgb;
-    dlib::array<array2d<float>> planar_hog;
 
     //cout << "s1: " << train_one->corp_id << endl; //debug
-
     TrainData_Process(train_one->img_id, train_one->img_label, img_rgb);
+
+    dlib::array<array2d<float>> planar_hog;
     extract_fhog_features(img_rgb, planar_hog);
+
+    /*array2d<matrix<float,31,1>> hog; //debug
+    extract_fhog_features(img_rgb, hog);
+    cout << hog.nc() << endl;
+    cout << hog.nr() << endl;
+    cout << hog[0][0].nc() << endl;
+    cout << hog[0][0].nr() << endl<< endl;
+    cout << planar_hog.size() << endl;
+    cout << planar_hog[0].nc() << endl;
+    cout << planar_hog[0].nr() << endl << endl;*/
 
     for(uint32_t u=0; u<planar_hog.size(); u+=4) //we don't need all size() 31 features so k+=4
     {
@@ -349,11 +359,11 @@ static void* Thread_CorpDetect(void* arg)
 static void detect_object(matrix<rgb_pixel> image, cv::PCA* pca, Ptr<SVM>* svm, int nEigens, Size win_size, float thres_hold = 0.4f)
 {
     int                     feature_times;
-    //float                	predict_socre;
-    //float                	history_score;
-    cv::Mat             	predictMat(1, nEigens, CV_32FC1);
+    //float                 predict_socre;
+    //float                 history_score;
+    cv::Mat                 predictMat(1, nEigens, CV_32FC1);
     cv::Point               p0,p1;
-    std::vector<cv::Rect> 	dstRects;
+    std::vector<cv::Rect>   dstRects;
     pthread_attr_t          pattr;
     pthread_t               pthread_id;
 
@@ -364,8 +374,8 @@ static void detect_object(matrix<rgb_pixel> image, cv::PCA* pca, Ptr<SVM>* svm, 
 
     //history_score = 0.0f;
 
-    uint32_t 	strider		= 0;
-    uint32_t 	remain_size	= s_corpdata_lst.size();
+    uint32_t    strider     = 0;
+    uint32_t    remain_size = s_corpdata_lst.size();
     while( remain_size > 0 )
     {
         if( remain_size >= s_thread_num )
@@ -373,10 +383,10 @@ static void detect_object(matrix<rgb_pixel> image, cv::PCA* pca, Ptr<SVM>* svm, 
         else
             s_signal_num = remain_size;
 
-    	/*must malloc memory pointer to pthread_create,
-    	 *using one address send to pthread_create,
-    	 *some of Thread_CorpDetect will get same corp_id*/
-    	std::vector<PcaSvm_t*> pca_svm_lst;
+        /*must malloc memory pointer to pthread_create,
+         *using one address send to pthread_create,
+         *some of Thread_CorpDetect will get same corp_id*/
+        std::vector<PcaSvm_t*> pca_svm_lst;
         for(uint32_t z=0; z<s_signal_num; z++)
         {
             PcaSvm_t* pcasvm    = (PcaSvm_t*)malloc(sizeof(PcaSvm_t));
@@ -409,14 +419,14 @@ static void detect_object(matrix<rgb_pixel> image, cv::PCA* pca, Ptr<SVM>* svm, 
     nms(s_srcRects, dstRects, 0.2f, 0);
     for( int i=0; i<dstRects.size(); i++)
     {
-    	cv::Rect r = dstRects[i];
-    	dlib::rectangle drect(r.tl().x, r.tl().y, r.br().x, r.br().y);
-    	dlib::draw_rectangle(image, drect,rgb_pixel(255,0,0));
+        cv::Rect r = dstRects[i];
+        dlib::rectangle drect(r.tl().x, r.tl().y, r.br().x, r.br().y);
+        dlib::draw_rectangle(image, drect,rgb_pixel(255,0,0));
     }
     s_srcRects.clear();
 
     //test show
-    cout << "close window to end" << endl << endl; 		//test
+    cout << "close window to end" << endl << endl;      //test
     image_window iwin;
     iwin.set_image(image);
     iwin.wait_until_closed();
@@ -526,8 +536,8 @@ int main(int argc, char** argv)
 //////////////////////detect test/////////////////////
     cout << "detect test start" << endl;
     load_images("./test", test_lst, win_size, false);
-    uint64_t		frames = 0;
-    double 			elapsed,fps;
+    uint64_t        frames = 0;
+    double          elapsed,fps;
     struct timespec t1, t2;
     clock_gettime(CLOCK_REALTIME, &t1);
 
@@ -542,7 +552,7 @@ int main(int argc, char** argv)
 
     clock_gettime(CLOCK_REALTIME, &t2);
     elapsed = ((t2.tv_sec - t1.tv_sec) * 1000000000 + t2.tv_nsec - t1.tv_nsec) / 1000000000.0;
-    fps 	= frames / elapsed;
+    fps     = frames / elapsed;
     printf("detected frames=%lu\nelapsed time=%f\nfps=%f\n", frames, elapsed, fps);
 
 //////////////////////destory/////////////////////
