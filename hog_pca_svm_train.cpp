@@ -149,9 +149,9 @@ static void HogDone_Process()
 
 static void* Thread_ComputeHog(void* arg)
 {
-    TrainSet_t*                         train_one = (TrainSet_t*)arg;
-    matrix<rgb_pixel>                   img_rgb;
-    dlib::array<dlib::array2d<float>>   planar_hog;
+    TrainSet_t*                 train_one = (TrainSet_t*)arg;
+    matrix<rgb_pixel>           img_rgb;
+    dlib::array<array2d<float>> planar_hog;
 
     //cout << "s1: " << train_one->corp_id << endl; //debug
 
@@ -280,13 +280,13 @@ static void DetectDone_Process()
 
 static void* Thread_CorpDetect(void* arg)
 {
-    PcaSvm_t*                           pcasvm = (PcaSvm_t*)arg;
-    int                                 feature_times;
-    float                               predict_socre;
-    cv::Point                           p0,p1;
-    CorpImage_t                         corp_data;
-    dlib::array<dlib::array2d<float>>   planar_hog;
-    cv::Mat                             predictMat(1, pcasvm->nEigens, CV_32FC1);
+    PcaSvm_t*                   pcasvm = (PcaSvm_t*)arg;
+    int                         feature_times;
+    float                       predict_socre;
+    cv::Point                   p0,p1;
+    CorpImage_t                 corp_data;
+    dlib::array<array2d<float>> planar_hog;
+    cv::Mat                     predictMat(1, pcasvm->nEigens, CV_32FC1);
 
     //cout << "s2: " << arg << endl;
 
