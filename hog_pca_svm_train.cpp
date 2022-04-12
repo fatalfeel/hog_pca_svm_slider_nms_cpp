@@ -197,7 +197,7 @@ static void* Thread_ComputeHog(void* arg)
     return NULL;
 }
 
-static void compute_HOGs( int img_label, std::vector<matrix<rgb_pixel>>& img_lst, Size win_size )
+static void compute_HOGs( int img_label, std::vector<matrix<rgb_pixel>>& img_lst )
 {
     pthread_attr_t  pattr;
     pthread_t       pthread_id;
@@ -477,12 +477,12 @@ int main(int argc, char** argv)
 ////////////////////////hog////////////////////////
     cout << "hog calculate start" << endl;
     load_images("./pos", s_pos_lst, win_size);
-    compute_HOGs( 1, s_pos_lst, win_size );
+    compute_HOGs( 1, s_pos_lst );
     positive_count = s_trainfhogs_lst.size();
     labels.assign( positive_count, +1 );
 
     load_images("./neg", s_neg_lst, win_size);
-    compute_HOGs(-1, s_neg_lst, win_size );
+    compute_HOGs(-1, s_neg_lst );
     negative_count = s_trainfhogs_lst.size() - positive_count;
     labels.insert(labels.end(), negative_count, -1);
 
