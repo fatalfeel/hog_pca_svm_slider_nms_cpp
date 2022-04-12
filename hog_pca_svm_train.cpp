@@ -458,7 +458,6 @@ int main(int argc, char** argv)
     int                             positive_count;
     int                             negative_count;
     std::vector<int>                labels;
-    std::vector<matrix<rgb_pixel>>  pos_lst, neg_lst, test_lst;
     //std::vector<cv::Mat>          trainfhogs_lst;
     Size                            win_size = Size(128, 256);
 
@@ -535,6 +534,7 @@ int main(int argc, char** argv)
 
 //////////////////////detect test/////////////////////
     cout << "detect test start" << endl;
+    std::vector<matrix<rgb_pixel>>  test_lst;
     load_images("./test", test_lst, win_size, false);
     uint64_t        frames = 0;
     double          elapsed,fps;
@@ -549,6 +549,7 @@ int main(int argc, char** argv)
             frames++;
         }
     }
+    test_lst.clear();
 
     clock_gettime(CLOCK_REALTIME, &t2);
     elapsed = ((t2.tv_sec - t1.tv_sec) * 1000000000 + t2.tv_nsec - t1.tv_nsec) / 1000000000.0;
